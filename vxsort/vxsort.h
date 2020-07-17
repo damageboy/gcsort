@@ -387,12 +387,12 @@ private:
         auto readLeft = left;
         auto readRight = right;
 
-        auto tmpStartLeft = _temp;
-        auto tmpLeft = tmpStartLeft;
-        auto tmpStartRight = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
-        auto tmpRight = tmpStartRight;
+        auto tmp_start_left = _temp;
+        auto tmp_left = tmp_start_left;
+        auto tmp_start_right = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
+        auto tmp_right = tmp_start_right;
 
-        tmpRight -= N;
+        tmp_right -= N;
 
         // the read heads always advance by 8 elements, or 32 bytes,
         // We can spend some extra time here to align the pointers
@@ -400,22 +400,21 @@ private:
         // Once that happens, we can read with Avx.LoadAlignedVector256
         // And also know for sure that our reads will never cross cache-lines
         // Otherwise, 50% of our AVX2 Loads will need to read from two cache-lines
-        align_vectorized(left, right, hint, P, readLeft, readRight,
-                         tmpStartLeft, tmpLeft, tmpStartRight, tmpRight);
+        align_vectorized(left, right, hint, P, readLeft, readRight, tmp_start_left, tmp_left, tmp_start_right, tmp_right);
 
         const auto leftAlign = hint.left_align;
         const auto rightAlign = hint.right_align;
         if (leftAlign > 0) {
-            tmpRight += N;
-            readLeft = align_left_scalar_uncommon(readLeft, pivot, tmpLeft, tmpRight);
-            tmpRight -= N;
+            tmp_right += N;
+            readLeft = align_left_scalar_uncommon(readLeft, pivot, tmp_left, tmp_right);
+            tmp_right -= N;
         }
 
         if (rightAlign < 0) {
-            tmpRight += N;
+            tmp_right += N;
             readRight =
-                    align_right_scalar_uncommon(readRight, pivot, tmpLeft, tmpRight);
-            tmpRight -= N;
+                    align_right_scalar_uncommon(readRight, pivot, tmp_left, tmp_right);
+            tmp_right -= N;
         }
 
         assert(((size_t)readLeft & ALIGN_MASK) == 0);
@@ -436,11 +435,11 @@ private:
         for (auto u = 0; u < InnerUnroll; u++) {
             auto dl = MT::load_vec(readLeftV + u);
             auto dr = MT::load_vec(readRightV - (u + 1));
-            partition_block(dl, P, tmpLeft, tmpRight);
-            partition_block(dr, P, tmpLeft, tmpRight);
+            partition_block(dl, P, tmp_left, tmp_right);
+            partition_block(dr, P, tmp_left, tmp_right);
         }
 
-        tmpRight += N;
+        tmp_right += N;
         // Adjust for the reading that was made above
         readLeftV  += InnerUnroll;
         readRightV -= InnerUnroll*2;
@@ -510,11 +509,11 @@ private:
         }
 
         // 3. Copy-back the 4 registers + remainder we partitioned in the beginning
-        auto leftTmpSize = tmpLeft - tmpStartLeft;
-        memcpy(writeLeft, tmpStartLeft, leftTmpSize * sizeof(T));
-        writeLeft += leftTmpSize;
-        auto rightTmpSize = tmpStartRight - tmpRight;
-        memcpy(writeLeft, tmpRight, rightTmpSize * sizeof(T));
+        auto left_tmp_size = tmp_left - tmp_start_left;
+        memcpy(writeLeft, tmp_start_left, left_tmp_size * sizeof(T));
+        writeLeft += left_tmp_size;
+        auto right_tmp_size = tmp_start_right - tmp_right;
+        memcpy(writeLeft, tmp_right, right_tmp_size * sizeof(T));
 
         // Shove to pivot back to the boundary
         *right = *writeLeft;
@@ -590,12 +589,12 @@ private:
         auto readLeft = left;
         auto readRight = right;
 
-        auto tmpStartLeft = _temp;
-        auto tmpLeft = tmpStartLeft;
-        auto tmpStartRight = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
-        auto tmpRight = tmpStartRight;
+        auto tmp_start_left = _temp;
+        auto tmp_left = tmp_start_left;
+        auto tmp_start_right = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
+        auto tmp_right = tmp_start_right;
 
-        tmpRight -= N;
+        tmp_right -= N;
 
         // the read heads always advance by 8 elements, or 32 bytes,
         // We can spend some extra time here to align the pointers
@@ -603,22 +602,21 @@ private:
         // Once that happens, we can read with Avx.LoadAlignedVector256
         // And also know for sure that our reads will never cross cache-lines
         // Otherwise, 50% of our AVX2 Loads will need to read from two cache-lines
-        align_vectorized(left, right, hint, P, readLeft, readRight,
-                         tmpStartLeft, tmpLeft, tmpStartRight, tmpRight);
+        align_vectorized(left, right, hint, P, readLeft, readRight, tmp_start_left, tmp_left, tmp_start_right, tmp_right);
 
         const auto leftAlign = hint.left_align;
         const auto rightAlign = hint.right_align;
         if (leftAlign > 0) {
-            tmpRight += N;
-            readLeft = align_left_scalar_uncommon(readLeft, pivot, tmpLeft, tmpRight);
-            tmpRight -= N;
+            tmp_right += N;
+            readLeft = align_left_scalar_uncommon(readLeft, pivot, tmp_left, tmp_right);
+            tmp_right -= N;
         }
 
         if (rightAlign < 0) {
-            tmpRight += N;
+            tmp_right += N;
             readRight =
-                align_right_scalar_uncommon(readRight, pivot, tmpLeft, tmpRight);
-            tmpRight -= N;
+                align_right_scalar_uncommon(readRight, pivot, tmp_left, tmp_right);
+            tmp_right -= N;
         }
 
         assert(((size_t)readLeft & ALIGN_MASK) == 0);
@@ -637,12 +635,11 @@ private:
 #endif
 
         auto write_left = (TPACK *) left;
-        auto write_right = (TPACK *) (right - N);
+        auto write_right = (TPACK *) right - 2*N;
 
         // We will be packing before partitioning, so
         // We must gnerate a pre-packed pivot
-        const auto packed_pivot = MT::template shift_n_sub<Shift>(pivot, offset);
-        const TV PPP = MT::broadcast();
+        const TV PPP = MT::broadcast(MT::template shift_n_sub<Shift>(pivot, offset));
 
         auto lenv = read_right_v - read_left_v;
         auto len_dv = lenv / 2;
@@ -674,12 +671,18 @@ private:
         // We might have one more vector worth of stuff to partition, so we'll do it with
         // scalar partitioning into the tmp space
         if (lenv > 0) {
-            const auto slack = (T *) (read_left_v + len_dv);
+            auto slack = MT::load_vec((TV *) (read_left_v + len_dv));
+            partition_block(slack, P, tmp_left, tmp_right);
+        }
 
-            for (auto i = 0; i < N; i++) {
-                const auto v = MT::template shift_n_sub<Shift>(slack[i], offset);
-                if (p)
-            }
+        write_right += 2*N;
+
+        for (auto p = tmp_start_left; p < tmp_left; p++) {
+            *(write_left++) = MT::template shift_n_sub<Shift>(*p, offset);
+        }
+
+        for (auto p = tmp_right; p < tmp_start_right; p++) {
+            *(--write_right) = MT::template shift_n_sub<Shift>(*p, offset);
         }
 
         return write_left - ((TPACK *) left);
