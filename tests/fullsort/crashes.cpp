@@ -75,6 +75,22 @@ TEST(PetersCrash, Crash2) {
 }
 #endif
 
+
+
+TEST(DummyDummyDummy, InlinePack) {
+    auto V = std::vector<int64_t>(1024);
+    auto base = (int64_t) std::numeric_limits<int32_t>::min();
+    generate_unique_ptrs_vec(V, base, (int64_t) 0x1, false);
+
+    const auto n = V.size();
+    auto begin = V.data();
+    auto end = begin + n - 1;
+    auto sorter = vxsort::vxsort<int64_t, vector_machine::AVX2>();
+    sorter.sort(begin, end, base, base + V.size());
+
+    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
+}
+
 }
 
 #include "vxsort_targets_disable.h"
