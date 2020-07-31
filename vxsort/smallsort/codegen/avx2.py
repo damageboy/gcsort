@@ -277,6 +277,7 @@ class AVX2BitonicISA(BitonicISA):
 #endif
 #endif
 
+#include <cassert>
 #include <limits>
 #include <immintrin.h>
 #include "bitonic_sort.h"
@@ -290,9 +291,6 @@ class AVX2BitonicISA(BitonicISA):
 
 namespace vxsort {{
 namespace smallsort {{
-
-extern "C" const uint8_t mask_table_4[16];
-extern "C" const uint8_t mask_table_8[64];
 
 template<> struct bitonic<{t}, AVX2> {{
     static const int N = {self.vector_size()};
@@ -515,8 +513,9 @@ public:
         g = self
         for m in range(1, g.max_bitonic_sort_vectors() + 1):
             s = f"""
-        static NOINLINE void sort_{m:02d}v_alt({type} *ptr, int remainder) {{
-            const auto mask = _mm256_cvtepi8_epi{int(256 / self.vector_size())}(_mm_loadu_si128((__m128i*)(mask_table_{self.vector_size()} + remainder * N)));
+    static NOINLINE void sort_{m:02d}v_alt({type} *ptr, int remainder) {{
+        assert(remainder * N < sizeof(mask_table_{self.vector_size()}));
+        const auto mask = _mm256_cvtepi8_epi{int(256 / self.vector_size())}(_mm_loadu_si128((__m128i*)(mask_table_{self.vector_size()} + remainder * N)));
 """
             print(s, file=f)
 
