@@ -41,5 +41,10 @@ TEST_P(BitonicAVX2_i64,    BitonicSortAVX2) { perform_bitonic_sort_test<int64_t,
 TEST_P(BitonicAVX2_ui64,   BitonicSortAVX2) { perform_bitonic_sort_test<uint64_t, vector_machine::AVX2>(V); }
 TEST_P(BitonicAVX2_double, BitonicSortAVX2) { perform_bitonic_sort_test<double,   vector_machine::AVX2>(V); }
 
+struct BitonicLoopAVX2_i32 : public SortTest<int32_t> {};
+auto bitonic_loopvalues_avx2_32 = ValuesIn(multiply_range(64, 4096, 2));
+INSTANTIATE_TEST_SUITE_P(BitonicLoopAVX2, BitonicLoopAVX2_i32,    bitonic_loopvalues_avx2_32, PrintValue());
+
+TEST_P(BitonicLoopAVX2_i32,    BitonicLoopAVX2) { perform_bitonic_sort_test<int32_t,  vector_machine::AVX2>(V); }
 }
 #include "vxsort_targets_disable.h"
