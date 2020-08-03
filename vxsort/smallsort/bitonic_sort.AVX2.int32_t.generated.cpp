@@ -71,13 +71,31 @@ void vxsort::smallsort::bitonic<int32_t, vector_machine::AVX2 >::sort(int32_t *p
             }
         }
 
-        for (int j = i/2; j >= 8; j /= 2) {
-            //auto depth = _tzcnt_u64(j);
-            for (auto p = p_start; p < p_end; p += j) {
+//        for (int j = i/2; j >= 8; j /= 2) {
+//            //auto depth = _tzcnt_u64(j);
+//            for (auto p = p_start; p < p_end; p += j) {
+//                auto half_stride = j/2;
+//                __m256i*  __restrict p1 = p;
+//                __m256i*  __restrict p2 = p + half_stride;
+//                auto p2_end = std::min(p + j, p_end);
+//                for (; p2 < p2_end; p1 += 4, p2 += 4) {
+//                    strided_min_max(p1 + 0, p2 + 0);
+//                    strided_min_max(p1 + 1, p2 + 1);
+//                    strided_min_max(p1 + 2, p2 + 2);
+//                    strided_min_max(p1 + 3, p2 + 3);
+//                }
+//            }
+//        }
+
+        const auto half_i = i /2;
+        for (auto p = p_start; p < p_end; p += half_i) {
+            auto p2_max = p + half_i;
+            auto p2_end = std::min(p2_max, p_end);
+            for (int j = half_i; j >= 8; j /= 2) {
+                //auto depth = _tzcnt_u64(j);
                 auto half_stride = j/2;
-                auto p1 = p;
-                auto p2 = p + half_stride;
-                auto p2_end = std::min(p + j, p_end);
+                __m256i*  __restrict p1 = p;
+                __m256i*  __restrict p2 = p + half_stride;
                 for (; p2 < p2_end; p1 += 4, p2 += 4) {
                     strided_min_max(p1 + 0, p2 + 0);
                     strided_min_max(p1 + 1, p2 + 1);
@@ -86,6 +104,7 @@ void vxsort::smallsort::bitonic<int32_t, vector_machine::AVX2 >::sort(int32_t *p
                 }
             }
         }
+
 
         for (auto p = p_start; p < p_end; p += 4) {
             auto d01 = _mm256_lddqu_si256(p + 0);
