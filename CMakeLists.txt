@@ -63,7 +63,7 @@ else()
     #set(CMAKE_CXX_FLAGS         "${CMAKE_CXX_FLAGS} -DBENCHMARK_ENABLE_LTO=true")
     set(CMAKE_CXX_FLAGS_DEBUG   "${SANITIZERS}")
     #set(CMAKE_CXX_FLAGS_RELEASE "-march=skylake-avx512 -mtune=skylake-avx512 -O2 -fomit-frame-pointer -DNDEBUG")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fomit-frame-pointer -DNDEBUG")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fomit-frame-pointer -DNDEBUG -fsave-optimization-record")
 endif()
 
 SET(CMAKE_CXX_FLAGS_STATS
