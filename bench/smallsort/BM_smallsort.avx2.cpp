@@ -21,6 +21,8 @@ BENCHMARK_TEMPLATE(BM_bitonic_sort, int64_t,  vector_machine::AVX2)->DenseRange(
 BENCHMARK_TEMPLATE(BM_bitonic_sort, uint64_t, vector_machine::AVX2)->DenseRange(2,  64, 2)->Unit(benchmark::kNanosecond);
 BENCHMARK_TEMPLATE(BM_bitonic_sort, double,   vector_machine::AVX2)->DenseRange(2,  64, 2)->Unit(benchmark::kNanosecond);
 
-BENCHMARK_TEMPLATE(BM_bitonicloop_sort, int32_t,  vector_machine::AVX2)->DenseRange(64, 4096, 32)->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(BM_bitonicloop_sort, int32_t,  vector_machine::AVX2)->DenseRange(16, 4096, 16)->Unit(benchmark::kNanosecond);
+
+BENCHMARK_TEMPLATE(BM_bitonicloop_32_sort, int32_t,  vector_machine::AVX2)->DenseRange(32, 4096, 32)->Unit(benchmark::kNanosecond);
 }
 

@@ -36,29 +36,41 @@ static INLINE void strided_min_max(__m256i* __restrict const p1, __m256i* __rest
 }
 
 void vxsort::smallsort::bitonic<int32_t, vector_machine::AVX2 >::sort(int32_t *ptr, size_t length) {
-    assert((length % 4) == 0);
+    // We keep up to the last 4 vectors
+    // in this temp space, because we need to deal with inputs < 4 vectors
+    // and also deal with the tail of the array when it isn't exactly divisible by 4
+    // vectors
+    __m256i slack[4];
 
+    // Full vectors
     auto v = length / N;
-    //const int remainder = (int) (length - v * N);
-    //assert(remainder * N < sizeof(mask_table_8));
-    //const auto mask = _mm256_cvtepi8_epi32(_mm_loadu_si128((__m128i*)(mask_table_8 + remainder * N)));
-    //const auto last_chunk_v = (v % 4) + ((remainder > 0) ? 1 : 0);
+    // # elements in the last vector
+    const int remainder = (int) (length - v * N);
+    const auto slack_v = (v % 4) + ((remainder > 0) ? 1 : 0);
 
-    auto p_start = (__m256i*)ptr;
-    const auto p_end = p_start + v;
-    //const auto p_end_quads = p_end - last_chunk_v;
+    assert(remainder * N < sizeof(mask_table_8));
+    // Load/Store mask for the last vector
+    const auto mask = _mm256_cvtepi8_epi32(_mm_loadu_si128((__m128i*)(mask_table_8 + remainder * N)));
+    // How many vectors in the last group of up to 4 vectors
 
-    //__m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
-    //__m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
-    //__m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
-    //__m256i d04 = _mm256_or_si256(_mm256_maskload_epi32((int32_t const *) ((__m256i const *) ptr + 3), mask), _mm256_andnot_si256(mask, _mm256_set1_epi32(MAX)));
+    auto last_chunk_v = slack_v;
 
+    const auto p_start = (__m256i*)ptr;
+    const auto p_end_inplace = p_start + ((v/4) * 4);
+    const auto p_virtual_end = p_end_inplace + ((slack_v > 0) ? 4 : 0);
+    v += (remainder > 0) ? 1 : 0;
 
-    for (auto p = p_start; p < p_end; p += 4) {
-        auto d01 = _mm256_lddqu_si256(p + 0);
-        auto d02 = _mm256_lddqu_si256(p + 1);
-        auto d03 = _mm256_lddqu_si256(p + 2);
-        auto d04 = _mm256_lddqu_si256(p + 3);
+    auto p_exit_loop = p_end_inplace;
+
+    __m256i *p = p_start;
+    __m256i d01, d02, d03, d04;
+
+    for (; p < p_exit_loop; p += 4) {
+        d01 = _mm256_lddqu_si256(p + 0);
+        d02 = _mm256_lddqu_si256(p + 1);
+        d03 = _mm256_lddqu_si256(p + 2);
+        d04 = _mm256_lddqu_si256(p + 3);
+ugly_hack_1:
         sort_04v_ascending(d01, d02, d03, d04);
         _mm256_storeu_si256(p + 0, d01);
         _mm256_storeu_si256(p + 1, d02);
@@ -66,16 +78,57 @@ void vxsort::smallsort::bitonic<int32_t, vector_machine::AVX2 >::sort(int32_t *p
         _mm256_storeu_si256(p + 3, d04);
     }
 
-    uint64_t max_v;
+    // We jump into the middle of the loop just for one last-time
+    // to handle the schwanz
+    p_exit_loop = nullptr;
+    switch (last_chunk_v) {
+        case 1:
+            d04 = d03 = d02 = _mm256_set1_epi32(MAX);
+            d01 = _mm256_or_si256(_mm256_maskload_epi32((int32_t *) (p + 0), mask),
+                                  _mm256_andnot_si256(mask, d02));
+            last_chunk_v = 0; p = slack; goto ugly_hack_1;
+        case 2:
+            d04 = d03 = _mm256_set1_epi32(MAX);
+            d01 = _mm256_lddqu_si256(p + 0);
+            d02 = _mm256_or_si256(_mm256_maskload_epi32((int32_t *) (p + 1), mask),
+                                  _mm256_andnot_si256(mask, d03));
+            last_chunk_v = 0; p = slack; goto ugly_hack_1;
+        case 3:
+            d04 = _mm256_set1_epi32(MAX);
+            d01 = _mm256_lddqu_si256(p + 0);
+            d02 = _mm256_lddqu_si256(p + 1);
+            d03 = _mm256_or_si256(_mm256_maskload_epi32((int32_t *) (p + 2), mask),
+                                  _mm256_andnot_si256(mask, d04));
 
-    max_v = closest_pow2(v);
+            last_chunk_v = 0; p = slack; goto ugly_hack_1;
+        case 4:
+            d01 = _mm256_lddqu_si256(p + 0);
+            d02 = _mm256_lddqu_si256(p + 1);
+            d03 = _mm256_lddqu_si256(p + 2);
+            d04 = _mm256_or_si256(_mm256_maskload_epi32((int32_t *) (p + 3), mask),
+                                  _mm256_andnot_si256(mask, _mm256_set1_epi32(MAX)));
+            last_chunk_v = 0; p = slack; goto ugly_hack_1;
+    }
+    last_chunk_v = slack_v;
+    p_exit_loop = p_end_inplace;
+
+    __m256i*  __restrict p1;
+    __m256i*  __restrict p2;
+    __m256i *p2_end;
+    int half_stride;
+
+    const auto max_v = closest_pow2(v);
     for (int i = 8; i <= max_v; i *= 2) {
-        for (auto p = p_start; p < p_end; p += i) {
-            auto half_stride = i / 2;
-            __m256i*  __restrict p1 = p + half_stride - 1;
-            __m256i*  __restrict p2 = p + half_stride;
-            auto p2_end = std::min(p + i, p_end);
+        for (p = p_start; p < p_virtual_end; p += i) {
+            half_stride = i / 2;
+            p1 = p + half_stride - 1;
+            p2 = p + half_stride;
+            p2_end = std::min(p + i, p_virtual_end);
             for (; p2 < p2_end; p1 -= 4, p2 += 4) {
+                if (p2 >= p_end_inplace) {
+                    p2 = slack;
+                    p2_end = slack + 4;
+                }
                 cross_min_max(p1 - 0, p2 + 0);
                 cross_min_max(p1 - 1, p2 + 1);
                 cross_min_max(p1 - 2, p2 + 2);
@@ -84,15 +137,18 @@ void vxsort::smallsort::bitonic<int32_t, vector_machine::AVX2 >::sort(int32_t *p
         }
 
         const auto half_i = i /2;
-//#define OLD_WAY
-#ifdef OLD_WAY
+
         for (int j = half_i; j >= 8; j /= 2) {
             const auto half_stride = j/2;
-            for (auto p = p_start; p < p_end; p += j) {
-                __m256i*  __restrict p1 = p;
-                __m256i*  __restrict p2 = p + half_stride;
-                auto p2_end = std::min(p + j, p_end);
+            for (auto p = p_start; p < p_virtual_end; p += j) {
+                p1 = p;
+                p2 = p + half_stride;
+                p2_end = std::min(p + j, p_virtual_end);
                 for (; p2 < p2_end; p1 += 4, p2 += 4) {
+                    if (p2 >= p_end_inplace) {
+                        p2 = slack;
+                        p2_end = slack + 4;
+                    }
                     strided_min_max(p1 + 0, p2 + 0);
                     strided_min_max(p1 + 1, p2 + 1);
                     strided_min_max(p1 + 2, p2 + 2);
@@ -100,112 +156,64 @@ void vxsort::smallsort::bitonic<int32_t, vector_machine::AVX2 >::sort(int32_t *p
                 }
             }
         }
-#else
-        for (auto p = p_start; p < p_end; p += half_i) {
-            auto p2_max = p + half_i;
-            auto p2_end = std::min(p2_max, p_end);
-            for (int j = half_i; j >= 8; j /= 2) {
-
-                auto half_stride = j/2;
-//                auto depth = _tzcnt_u64(j);
-//                const auto length = p2_end - p;
-//                if (depth < 5 || length != 32) {
-                    __m256i* __restrict p1 = p;
-                    __m256i* __restrict p2 = p + half_stride;
-                    // printf("min-max: %llu, <->  %ld\n", depth, p2_end - p1);
-                    for (; p2 < p2_end; p1 += 4, p2 += 4) {
-                        strided_min_max(p1 + 0, p2 + 0);
-                        strided_min_max(p1 + 1, p2 + 1);
-                        strided_min_max(p1 + 2, p2 + 2);
-                        strided_min_max(p1 + 3, p2 + 3);
-                    }
-                    //j /= 2;
-#ifdef XXX
-                } else {
-                    __m256i* __restrict p1 = p + 0;
-                    __m256i* __restrict p2 = p + 16;
-                    // printf("3x min-max: %llu, <->  %ld\n", depth, p2_end - p1);
-
-                    for (int x = 0; x < 4; p1++, p2++, x++) {
-                        __m256i tmp;
-                        auto dl01 = _mm256_lddqu_si256(p1 + 0);
-                        auto dl02 = _mm256_lddqu_si256(p1 + 4);
-                        auto dl03 = _mm256_lddqu_si256(p1 + 8);
-                        auto dl04 = _mm256_lddqu_si256(p1 + 12);
-
-                        auto dr01 = _mm256_lddqu_si256(p2 + 0);
-                        auto dr02 = _mm256_lddqu_si256(p2 + 4);
-                        auto dr03 = _mm256_lddqu_si256(p2 + 8);
-                        auto dr04 = _mm256_lddqu_si256(p2 + 12);
-                        // 1
-                        tmp = dl01;
-                        dl01 = _mm256_min_epi32(dr01, dl01);
-                        dr01 = _mm256_max_epi32(dr01, tmp);
-                        tmp = dl02;
-                        dl02 = _mm256_min_epi32(dr02, dl02);
-                        dr02 = _mm256_max_epi32(dr02, tmp);
-                        tmp = dl03;
-                        dl03 = _mm256_min_epi32(dr03, dl03);
-                        dr03 = _mm256_max_epi32(dr03, tmp);
-                        tmp = dl04;
-                        dl04 = _mm256_min_epi32(dr04, dl04);
-                        dr04 = _mm256_max_epi32(dr04, tmp);
-                        // 2
-                        tmp = dl01;
-                        dl01 = _mm256_min_epi32(dl03, dl01);
-                        dl03 = _mm256_max_epi32(dl03, tmp);
-                        tmp = dl02;
-                        dl02 = _mm256_min_epi32(dl04, dl02);
-                        dl04 = _mm256_max_epi32(dl04, tmp);
-                        tmp = dr01;
-                        dr01 = _mm256_min_epi32(dr03, dr01);
-                        dr03 = _mm256_max_epi32(dr03, tmp);
-                        tmp = dr02;
-                        dr02 = _mm256_min_epi32(dr04, dr02);
-                        dr04 = _mm256_max_epi32(dr04, tmp);
-                        // 3
-                        tmp = dl01;
-                        dl01 = _mm256_min_epi32(dl02, dl01);
-                        dl02 = _mm256_max_epi32(dl02, tmp);
-                        tmp = dl03;
-                        dl03 = _mm256_min_epi32(dl04, dl03);
-                        dl04 = _mm256_max_epi32(dl04, tmp);
-                        tmp = dr01;
-                        dr01 = _mm256_min_epi32(dr02, dr01);
-                        dr02 = _mm256_max_epi32(dr02, tmp);
-                        tmp = dr03;
-                        dr03 = _mm256_min_epi32(dr04, dr03);
-                        dr04 = _mm256_max_epi32(dr04, tmp);
-
-                        _mm256_storeu_si256(p1 + 0, dl01);
-                        _mm256_storeu_si256(p1 + 4, dl02);
-                        _mm256_storeu_si256(p1 + 8, dl03);
-                        _mm256_storeu_si256(p1 + 12, dl04);
-
-                        _mm256_storeu_si256(p2 + 0, dr01);
-                        _mm256_storeu_si256(p2 + 4, dr02);
-                        _mm256_storeu_si256(p2 + 8, dr03);
-                        _mm256_storeu_si256(p2 + 12, dr04);
-                    }
-                    j /= 8;
-                }
-#endif
-            }
-        }
-#endif
-        //printf("merge!\n");
-        for (auto p = p_start; p < p_end; p += 4) {
-            auto d01 = _mm256_lddqu_si256(p + 0);
-            auto d02 = _mm256_lddqu_si256(p + 1);
-            auto d03 = _mm256_lddqu_si256(p + 2);
-            auto d04 = _mm256_lddqu_si256(p + 3);
+        p = p_start;
+        for (; p < p_exit_loop; p += 4) {
+ugly_hack_4:
+            d01 = _mm256_lddqu_si256(p + 0);
+            d02 = _mm256_lddqu_si256(p + 1);
+            d03 = _mm256_lddqu_si256(p + 2);
+            d04 = _mm256_lddqu_si256(p + 3);
             sort_04v_merge_ascending(d01, d02, d03, d04);
             _mm256_storeu_si256(p + 0, d01);
             _mm256_storeu_si256(p + 1, d02);
             _mm256_storeu_si256(p + 2, d03);
             _mm256_storeu_si256(p + 3, d04);
         }
+        if (last_chunk_v > 0) {
+            p = slack;
+            p_exit_loop = nullptr;
+            last_chunk_v = 0;
+            goto ugly_hack_4;
+        }
+        last_chunk_v = slack_v;
+        p_exit_loop = p_end_inplace;
+
     }
+
+    switch (last_chunk_v) {
+        case 0:
+            break;
+        case 1:
+            d01 = _mm256_lddqu_si256(slack + 0);
+            _mm256_maskstore_epi32((int32_t *) (p_end_inplace + 0), mask, d01);
+            break;
+        case 2:
+            d01 = _mm256_lddqu_si256(slack + 0);
+            d02 = _mm256_lddqu_si256(slack + 1);
+            _mm256_storeu_si256(p_end_inplace + 0, d01);
+            _mm256_maskstore_epi32((int32_t *) (p_end_inplace + 1), mask, d02);
+            break;
+        case 3:
+            d01 = _mm256_lddqu_si256(slack + 0);
+            d02 = _mm256_lddqu_si256(slack + 1);
+            d03 = _mm256_lddqu_si256(slack + 2);
+            _mm256_storeu_si256(p_end_inplace + 0, d01);
+            _mm256_storeu_si256(p_end_inplace + 1, d02);
+            _mm256_maskstore_epi32((int32_t *) (p_end_inplace + 2), mask, d03);
+            break;
+        case 4:
+            d01 = _mm256_lddqu_si256(slack + 0);
+            d02 = _mm256_lddqu_si256(slack + 1);
+            d03 = _mm256_lddqu_si256(slack + 2);
+            d04 = _mm256_lddqu_si256(slack + 3);
+            _mm256_storeu_si256(p_end_inplace + 0, d01);
+            _mm256_storeu_si256(p_end_inplace + 1, d02);
+            _mm256_storeu_si256(p_end_inplace + 2, d03);
+            _mm256_maskstore_epi32((int32_t *) (p_end_inplace + 3), mask, d04);
+            break;
+    }
+
+
 }
 
 #include "vxsort_targets_disable.h"
