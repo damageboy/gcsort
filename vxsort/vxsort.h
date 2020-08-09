@@ -23,6 +23,7 @@
 #include "smallsort/bitonic_sort.h"
 
 #include <algorithm>
+#include <memory>
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
@@ -53,15 +54,11 @@ private:
 
     static const int ELEMENT_ALIGN = sizeof(T) - 1;
     static const int N = sizeof(TV) / sizeof(T);
-    static const int32_t MAX_BITONIC_SORT_VECTORS = 16;
-    static const int32_t SMALL_SORT_THRESHOLD_ELEMENTS = MAX_BITONIC_SORT_VECTORS * N;
-    static const int32_t MaxInnerUnroll = (MAX_BITONIC_SORT_VECTORS - 3) / 2;
-    static const int32_t SafeInnerUnroll = MaxInnerUnroll > Unroll ? Unroll : MaxInnerUnroll;
-    static const int32_t PackUnroll = (Unroll / 2 > 0) ? Unroll / 2 : 1;
+    static const int32_t SMALL_SORT_THRESHOLD_ELEMENTS = 1024; 
+    static const int32_t SMALL_SORT_THRESHOLD_VECTORS = SMALL_SORT_THRESHOLD_ELEMENTS / N;
     static const int32_t SLACK_PER_SIDE_IN_VECTORS = Unroll;
     static const size_t ALIGN = AH::ALIGN;
     static const size_t ALIGN_MASK = ALIGN - 1;
-
     static const int SLACK_PER_SIDE_IN_ELEMENTS = SLACK_PER_SIDE_IN_VECTORS * N;
     // The formula for figuring out how much temporary space we need for partitioning:
     // 2 x the number of slack elements on each side for the purpose of partitioning in unrolled manner +
@@ -73,6 +70,10 @@ private:
     // This long sense just means that we over-allocate N+2 elements...
     static const int PARTITION_TMP_SIZE_IN_ELEMENTS =
             (2 * SLACK_PER_SIDE_IN_ELEMENTS + N + 4*N);
+
+    static_assert(PARTITION_TMP_SIZE_IN_ELEMENTS < SMALL_SORT_THRESHOLD_ELEMENTS, "Unroll-level must match small-sorting threshold");
+    static const int32_t PackUnroll = (Unroll / 2 > 0) ? Unroll / 2 : 1;
+
 
     void reset(T* start, T* end) {
         _depth = 0;
@@ -196,7 +197,15 @@ private:
             vxsort_stats<T>::bump_small_sorts();
             vxsort_stats<T>::record_small_sort_size(length);
 #endif
-            bitonic<T, M>::sort(left, length);
+
+            const auto aligned_left = reinterpret_cast<T *>(reinterpret_cast<uintptr_t>(left) & ~(N - 1));
+            if (aligned_left < _startPtr) {
+                bitonic<T, M>::sort(left, length);
+                return;
+            }
+
+            length += (left - aligned_left);
+            bitonic<T, M>::sort(aligned_left, length);
             return;
         }
 
@@ -282,9 +291,7 @@ private:
             }
         }
 
-        auto sep = (length < PARTITION_TMP_SIZE_IN_ELEMENTS) ?
-                vectorized_partition<SafeInnerUnroll>(left, right, realign_hint) :
-                vectorized_partition<Unroll>(left, right, realign_hint);
+        auto sep = vectorized_partition<Unroll>(left, right, realign_hint);
 
         _depth++;
         sort(left, sep - 2, left_hint, *sep, realign_hint.realign_right(), depth_limit);
