@@ -5,12 +5,12 @@
 
 #include "fullsort_test.h"
 #include <machine_traits.avx512.h>
-#include <smallsort/bitonic_sort.AVX512.double.generated.h>
-#include <smallsort/bitonic_sort.AVX512.float.generated.h>
-#include <smallsort/bitonic_sort.AVX512.int32_t.generated.h>
-#include <smallsort/bitonic_sort.AVX512.int64_t.generated.h>
-#include <smallsort/bitonic_sort.AVX512.uint32_t.generated.h>
-#include <smallsort/bitonic_sort.AVX512.uint64_t.generated.h>
+#include <smallsort/bitonic_machine.AVX512.double.generated.h>
+#include <smallsort/bitonic_machine.AVX512.float.generated.h>
+#include <smallsort/bitonic_machine.AVX512.int32_t.generated.h>
+#include <smallsort/bitonic_machine.AVX512.int64_t.generated.h>
+#include <smallsort/bitonic_machine.AVX512.uint32_t.generated.h>
+#include <smallsort/bitonic_machine.AVX512.uint64_t.generated.h>
 
 namespace vxsort_tests {
 using testing::Types;

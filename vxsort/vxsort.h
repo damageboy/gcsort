@@ -29,7 +29,6 @@
 #include <cstdio>
 
 namespace vxsort {
-using vxsort::smallsort::bitonic;
 
 /**
  * sort primitives, quickly
@@ -47,9 +46,9 @@ class vxsort {
 
 private:
     using MT = vxsort_machine_traits<T, M>;
-    typedef typename MT::TV TV;
     typedef typename MT::TPACK TPACK;
     using MT_PACKED = vxsort_machine_traits<TPACK, M>;
+    typedef typename MT::TV TV;
     typedef alignment_hint<sizeof(TV)> AH;
 
     static const int ELEMENT_ALIGN = sizeof(T) - 1;
@@ -200,12 +199,12 @@ private:
 
             const auto aligned_left = reinterpret_cast<T *>(reinterpret_cast<uintptr_t>(left) & ~(N - 1));
             if (aligned_left < _startPtr) {
-                bitonic<T, M>::sort(left, length);
+                smallsort::bitonic<T, M>::sort(left, length);
                 return;
             }
 
             length += (left - aligned_left);
-            bitonic<T, M>::sort(aligned_left, length);
+            smallsort::bitonic<T, M>::sort(aligned_left, length);
             return;
         }
 
@@ -611,7 +610,7 @@ private:
         // We will be packing before partitioning, so
         // We must gnerate a pre-packed pivot
         const auto packed_pivot = MT::template shift_n_sub<Shift>(pivot, offset);
-        const TV PPP = MT_PACKED::broadcast(packed_pivot);
+        const TV PPP = MT_PACKED::broadcast(static_cast<TPACK>(packed_pivot));
 
         auto lenv = read_right_v - read_left_v;
         auto len_dv = lenv / 2;
@@ -650,14 +649,14 @@ private:
         write_right += 2*N;
 
         for (auto p = tmp_start_left; p < tmp_left; p++) {
-            *(write_left++) = MT::template shift_n_sub<Shift>(*p, offset);
+            *(write_left++) = static_cast<TPACK>(MT::template shift_n_sub<Shift>(*p, offset));
         }
 
         for (auto p = tmp_right; p < tmp_start_right; p++) {
-            *(--write_right) = MT::template shift_n_sub<Shift>(*p, offset);
+            *(--write_right) = static_cast<TPACK>(MT::template shift_n_sub<Shift>(*p, offset));
         }
 
-        *write_left++ = packed_pivot;
+        *write_left++ = static_cast<TPACK>(packed_pivot);
 
         return write_left - ((TPACK *) left);
     }

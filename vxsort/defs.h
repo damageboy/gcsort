@@ -34,6 +34,7 @@
 #define mess_up_cmov() _ReadBarrier();
 #define INLINE __forceinline
 #define NOINLINE __declspec(noinline)
+#define VXSORT_COMPILER_MSVC 1
 #endif
 #else
 // GCC + Clang

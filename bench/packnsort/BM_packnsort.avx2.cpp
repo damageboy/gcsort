@@ -4,8 +4,8 @@
 #include <benchmark/benchmark.h>
 
 #include <machine_traits.avx2.h>
-#include <smallsort/bitonic_sort.AVX2.int32_t.generated.h>
-#include <smallsort/bitonic_sort.AVX2.int64_t.generated.h>
+#include <smallsort/bitonic_machine.AVX2.int32_t.generated.h>
+#include <smallsort/bitonic_machine.AVX2.int64_t.generated.h>
 
 #include "BM_packnsort.h"
 

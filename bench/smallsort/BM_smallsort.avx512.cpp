@@ -1,11 +1,14 @@
+#include "vxsort_targets_enable_avx512.h"
+
 #include "BM_smallsort.h"
 
-#include <smallsort/bitonic_sort.AVX512.float.generated.h>
-#include <smallsort/bitonic_sort.AVX512.int32_t.generated.h>
-#include <smallsort/bitonic_sort.AVX512.uint32_t.generated.h>
-#include <smallsort/bitonic_sort.AVX512.double.generated.h>
-#include <smallsort/bitonic_sort.AVX512.int64_t.generated.h>
-#include <smallsort/bitonic_sort.AVX512.uint64_t.generated.h>
+#include <machine_traits.avx512.h>
+#include <smallsort/bitonic_machine.AVX512.float.generated.h>
+#include <smallsort/bitonic_machine.AVX512.int32_t.generated.h>
+#include <smallsort/bitonic_machine.AVX512.uint32_t.generated.h>
+#include <smallsort/bitonic_machine.AVX512.double.generated.h>
+#include <smallsort/bitonic_machine.AVX512.int64_t.generated.h>
+#include <smallsort/bitonic_machine.AVX512.uint64_t.generated.h>
 
 using vxsort::vector_machine;
 
@@ -22,3 +25,4 @@ BENCHMARK_TEMPLATE(BM_bitonic_sort, double,   vector_machine::AVX512)->DenseRang
 
 }
 
+#include "vxsort_targets_disable.h"

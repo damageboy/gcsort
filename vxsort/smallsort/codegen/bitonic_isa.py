@@ -14,7 +14,7 @@ class BitonicISA(ABC, metaclass=ABCMeta):
         pass
 
     def largest_merge_variant_needed(self):
-        return next_power_of_2(self.max_bitonic_sort_vectors()) / 2;
+        return next_power_of_2(self.max_bitonic_sort_vectors());
 
     @abstractmethod
     def vector_size(self):
@@ -64,4 +64,12 @@ class BitonicISA(ABC, metaclass=ABCMeta):
 
     @abstractmethod
     def generate_master_entry_point(self, f):
+        pass
+
+    @abstractmethod
+    def generate_cross_min_max(self, f):
+        pass
+
+    @abstractmethod
+    def generate_strided_min_max(self, f):
         pass

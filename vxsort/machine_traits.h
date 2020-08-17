@@ -1,7 +1,3 @@
-//
-// Created by dans on 6/1/20.
-//
-
 #ifndef VXSORT_MACHINE_TRAITS_H
 #define VXSORT_MACHINE_TRAITS_H
 
@@ -20,6 +16,7 @@ template <typename T, vector_machine M>
 struct vxsort_machine_traits {
    public:
     typedef T TV;
+    typedef T TLOADSTOREMASK;
     typedef T TMASK;
     typedef T TPACK;
 
@@ -42,9 +39,23 @@ struct vxsort_machine_traits {
     static TV load_vec(TV* ptr) {
         static_assert(sizeof(TV) != sizeof(TV), "func must be specialized!");
     }
+
+    static TLOADSTOREMASK generate_remainder_mask(int remainder) {
+        static_assert(sizeof(TV) != sizeof(TV), "func must be specialized!");
+    }
+
     static void store_vec(TV* ptr, TV v) {
         static_assert(sizeof(TV) != sizeof(TV), "func must be specialized!");
     }
+
+    static TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+        static_assert(sizeof(TV) != sizeof(TV), "func must be specialized!");
+    }
+
+    static void store_masked_vec(TV *ptr, TV v, TLOADSTOREMASK mask) {
+        static_assert(sizeof(TV) != sizeof(TV), "func must be specialized!");
+    }
+
     static void store_compress_vec(TV* ptr, TV v, TMASK mask) {
         static_assert(sizeof(TV) != sizeof(TV), "func must be specialized!");
     }

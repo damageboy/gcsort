@@ -3,7 +3,8 @@
 
 #include "vxsort.h"
 #include "machine_traits.avx2.h"
-#include "smallsort/bitonic_sort.AVX2.int32_t.generated.h"
+#include "smallsort/bitonic_machine.AVX2.int32_t.generated.h"
+#include "smallsort/bitonic_sort.h"
 
 void do_avx2(int *begin, int *end) {
   auto sorter = vxsort::vxsort<int, vxsort::vector_machine::AVX2, 8>();

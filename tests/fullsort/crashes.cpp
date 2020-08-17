@@ -4,9 +4,13 @@
 #include "../fixtures.h"
 #include <vector>
 
-#include <vxsort.h>
 #include <machine_traits.avx2.h>
-#include <smallsort/bitonic_sort.AVX512.int64_t.generated.h>
+#include <smallsort/bitonic_machine.h>
+#include <smallsort/bitonic_machine.AVX2.int64_t.generated.h>
+#include <smallsort/bitonic_machine.AVX2.int32_t.generated.h>
+#include <smallsort/bitonic_sort.h>
+
+#include <vxsort.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -74,22 +78,6 @@ TEST(PetersCrash, Crash2) {
               WhenSorted(ElementsAreArray(result)));
 }
 #endif
-
-
-
-TEST(DummyDummyDummy, InlinePack) {
-    auto V = std::vector<int64_t>(1024);
-    auto base = (int64_t) std::numeric_limits<int32_t>::min();
-    generate_unique_ptrs_vec(V, base, (int64_t) 0x1, false);
-
-    const auto n = V.size();
-    auto begin = V.data();
-    auto end = begin + n - 1;
-    auto sorter = vxsort::vxsort<int64_t, vector_machine::AVX2>();
-    sorter.sort(begin, end, base, base + V.size());
-
-    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
-}
 
 }
 

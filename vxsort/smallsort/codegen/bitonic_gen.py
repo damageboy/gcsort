@@ -33,7 +33,7 @@ def get_generator(vector_isa, type):
         raise Exception(f"Non-supported vector machine-type: {vector_isa}")
 
 
-def generate_per_type(f_header, f_src, type, vector_isa, break_inline):
+def generate_per_type(f_header, type, vector_isa, break_inline):
     g = get_generator(vector_isa, type)
     g.generate_prologue(f_header)
     g.generate_1v_sorters(f_header, ascending=True)
@@ -51,9 +51,13 @@ def generate_per_type(f_header, f_src, type, vector_isa, break_inline):
             g.generate_compounded_merger(f_header, width, ascending=True, inline=inline)
             g.generate_compounded_merger(f_header, width, ascending=False, inline=inline)
 
+
+    g.generate_cross_min_max(f_header)
+    g.generate_strided_min_max(f_header)
+
     #g.generate_entry_points_old(f_header)
-    g.generate_entry_points(f_header)
-    g.generate_master_entry_point(f_header, f_src)
+    #g.generate_entry_points(f_header)
+    #g.generate_master_entry_point(f_header, f_src)
     g.generate_epilogue(f_header)
 
 
@@ -95,12 +99,12 @@ def generate_all_types():
 
     for isa in opts.vector_isa:
         for t in get_generator_supported_types(isa):
-            filename = f"bitonic_sort.{isa}.{t}.generated"
+            filename = f"bitonic_machine.{isa}.{t}.generated"
             print(f"Generating {filename}.{{h,.cpp}}")
             h_filename = os.path.join(opts.output_dir, filename + ".h")
-            h_src = os.path.join(opts.output_dir, filename + ".cpp")
-            with open(h_filename, "w") as f_header, open(h_src, "w") as f_source:
-                generate_per_type(f_header, f_source, t, isa, opts.break_inline)
+            #h_src = os.path.join(opts.output_dir, filename + ".cpp")
+            with open(h_filename, "w") as f_header:
+                generate_per_type(f_header, t, isa, opts.break_inline)
 
 if __name__ == '__main__':
     generate_all_types()

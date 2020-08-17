@@ -5,7 +5,7 @@
 
 #include "packnsort_test.h"
 #include <machine_traits.avx512.h>
-#include <smallsort/bitonic_sort.AVX512.int32_t.generated.h>
+#include <smallsort/bitonic_machine.AVX512.int32_t.generated.h>
 
 namespace vxsort_tests {
 using testing::Types;

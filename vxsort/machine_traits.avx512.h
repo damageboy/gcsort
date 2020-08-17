@@ -18,9 +18,12 @@ class vxsort_machine_traits<int32_t, AVX512> {
    public:
     typedef int32_t T;
     typedef __m512i TV;
+    typedef __mmask16 TLOADSTOREMASK;
     typedef __mmask16 TMASK;
     typedef int32_t TPACK;
     typedef typename std::make_unsigned<T>::type TU;
+
+    static const int N = sizeof(TV) / sizeof(T);
 
     static constexpr bool supports_compress_writes() { return true; }
 
@@ -29,9 +32,23 @@ class vxsort_machine_traits<int32_t, AVX512> {
     template <int Shift>
     static constexpr bool can_pack(T span) { return false; }
 
+    static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
+        assert(remainder >= 0);
+        assert(remainder <= 16);
+        return  0xFFFF >> ((N - remainder) & (N-1));
+    }
+
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_si512(p); }
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_si512(ptr, v); }
+
+    static TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+        return _mm512_mask_loadu_epi32(base, mask, (int32_t const *) ptr);
+    }
+
+    static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {
+        _mm512_mask_storeu_epi32(p, mask, v);
+    }
 
     // Will never be called
     static INLINE TV partition_vector(TV v, int mask) { return v; }
@@ -74,9 +91,12 @@ class vxsort_machine_traits<uint32_t, AVX512> {
    public:
     typedef uint32_t T;
     typedef __m512i TV;
+    typedef __mmask16 TLOADSTOREMASK;
     typedef __mmask16 TMASK;
     typedef uint32_t TPACK;
     typedef typename std::make_unsigned<T>::type TU;
+
+    static const int N = sizeof(TV) / sizeof(T);
 
     static constexpr bool supports_compress_writes() { return true; }
 
@@ -85,9 +105,23 @@ class vxsort_machine_traits<uint32_t, AVX512> {
     template <int Shift>
     static constexpr bool can_pack(T span) { return false; }
 
+    static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
+        assert(remainder >= 0);
+        assert(remainder <= 16);
+        return  0xFFFF >> ((N - remainder) & (N-1));
+    }
+
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_si512(p); }
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_si512(ptr, v); }
+
+    static TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+        return _mm512_mask_loadu_epi32(base, mask, (int32_t const *) ptr);
+    }
+
+    static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {
+        _mm512_mask_storeu_epi32(p, mask, v);
+    }
 
     // Will never be called
     static INLINE TV partition_vector(TV v, int mask) { return v; }
@@ -131,8 +165,11 @@ class vxsort_machine_traits<float, AVX512> {
    public:
     typedef float T;
     typedef __m512 TV;
+    typedef __mmask16 TLOADSTOREMASK;
     typedef __mmask16 TMASK;
     typedef float TPACK;
+
+    static const int N = sizeof(TV) / sizeof(T);
 
     static constexpr bool supports_compress_writes() { return true; }
 
@@ -141,9 +178,23 @@ class vxsort_machine_traits<float, AVX512> {
     template <int Shift>
     static constexpr bool can_pack(T span) { return false; }
 
+    static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
+        assert(remainder >= 0);
+        assert(remainder <= 16);
+        return  0xFFFF >> ((N - remainder) & (N-1));
+    }
+
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_ps(p); }
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_ps(ptr, v); }
+
+    static TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+        return _mm512_mask_loadu_ps(base, mask, (float const *) ptr);
+    }
+
+    static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {
+        _mm512_mask_storeu_ps(p, mask, v);
+    }
 
     // Will never be called
     static INLINE TV partition_vector(TV v, int mask) { return v; }
@@ -175,9 +226,12 @@ class vxsort_machine_traits<int64_t, AVX512> {
    public:
     typedef int64_t T;
     typedef __m512i TV;
+    typedef __mmask8 TLOADSTOREMASK;
     typedef __mmask8 TMASK;
     typedef int32_t TPACK;
     typedef typename std::make_unsigned<T>::type TU;
+
+    static const int N = sizeof(TV) / sizeof(T);
 
     static constexpr bool supports_compress_writes() { return true; }
 
@@ -189,9 +243,23 @@ class vxsort_machine_traits<int64_t, AVX512> {
         return ((TU) span) < PACK_LIMIT;
     }
 
+    static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
+        assert(remainder >= 0);
+        assert(remainder <= 8);
+        return 0xFF >> ((N - remainder) & (N-1));
+    }
+
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_si512(p); }
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_si512(ptr, v); }
+
+    static INLINE TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+        return _mm512_mask_loadu_epi64(base, mask, (int64_t const *) ptr);
+    }
+
+    static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {
+        _mm512_mask_storeu_epi64(p, mask, v);
+    }
 
     // Will never be called
     static INLINE TV partition_vector(TV v, int mask) { return v; }
@@ -249,9 +317,12 @@ class vxsort_machine_traits<uint64_t, AVX512> {
    public:
     typedef uint64_t T;
     typedef __m512i TV;
+    typedef __mmask8 TLOADSTOREMASK;
     typedef __mmask8 TMASK;
     typedef uint32_t TPACK;
     typedef typename std::make_unsigned<T>::type TU;
+
+    static const int N = sizeof(TV) / sizeof(T);
 
     static constexpr bool supports_compress_writes() { return true; }
 
@@ -263,9 +334,23 @@ class vxsort_machine_traits<uint64_t, AVX512> {
         return ((TU) span) < PACK_LIMIT;
     }
 
+    static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
+        assert(remainder >= 0);
+        assert(remainder <= 8);
+        return 0xFF >> ((N - remainder) & (N-1));
+    }
+
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_si512(p); }
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_si512(ptr, v); }
+
+    static INLINE TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+        return _mm512_mask_loadu_epi64(base, mask, (int64_t const *) ptr);
+    }
+
+    static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {
+        _mm512_mask_storeu_epi64(p, mask, v);
+    }
 
     // Will never be called
     static INLINE TV partition_vector(TV v, int mask) { return v; }
@@ -323,8 +408,11 @@ class vxsort_machine_traits<double, AVX512> {
    public:
     typedef double T;
     typedef __m512d TV;
+    typedef __mmask8 TLOADSTOREMASK;
     typedef __mmask8 TMASK;
     typedef double TPACK;
+
+    static const int N = sizeof(TV) / sizeof(T);
 
     static constexpr bool supports_compress_writes() { return true; }
 
@@ -333,9 +421,23 @@ class vxsort_machine_traits<double, AVX512> {
     template <int Shift>
     static constexpr bool can_pack(T) { return false; }
 
+    static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
+        assert(remainder >= 0);
+        assert(remainder <= 8);
+        return 0xFF >> ((N - remainder) & (N-1));
+    }
+
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_pd(p); }
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_pd(ptr, v); }
+
+    static INLINE TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+        return _mm512_mask_loadu_pd(base, mask, (int64_t const *) ptr);
+    }
+
+    static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {
+        _mm512_mask_storeu_pd(p, mask, v);
+    }
 
     // Will never be called
     static INLINE TV partition_vector(TV v, int mask) { return v; }
