@@ -20,9 +20,9 @@ using namespace std;
 template <typename T, vector_machine M>
 struct bitonic {
     using BM = bitonic_machine<T, M>;
-    using MT = vxsort_machine_traits<T, M>;
+    using VM = vxsort_machine_traits<T, M>;
     static constexpr T MAX = std::numeric_limits<T>::max();
-    typedef typename MT::TV TV;
+    typedef typename VM::TV TV;
     static constexpr int N = sizeof(TV) / sizeof(T);
 
    private:
@@ -43,11 +43,11 @@ struct bitonic {
     // Full vectors
     auto v = length / N;
     // # elements in the last vector
-    const int remainder = (int) (length - v * N);
+    const int remainder = static_cast<int>(length - v * N);
     const auto slack_v = (v % 4) + ((remainder > 0) ? 1 : 0);
 
     // Load/Store mask for the last vector
-    const auto mask = MT::generate_remainder_mask(remainder);
+    const auto mask = VM::generate_remainder_mask(remainder);
     // How many vectors in the last group of up to 4 vectors
     auto last_chunk_v = slack_v;
 
@@ -62,16 +62,16 @@ struct bitonic {
     TV d01, d02, d03, d04;
 
     for (; p < p_exit_loop; p += 4) {
-        d01 = MT::load_vec(p + 0);
-        d02 = MT::load_vec(p + 1);
-        d03 = MT::load_vec(p + 2);
-        d04 = MT::load_vec(p + 3);
+        d01 = VM::load_vec(p + 0);
+        d02 = VM::load_vec(p + 1);
+        d03 = VM::load_vec(p + 2);
+        d04 = VM::load_vec(p + 3);
         ugly_hack_1:
         BM::sort_04v_ascending(d01, d02, d03, d04);
-        MT::store_vec(p + 0, d01);
-        MT::store_vec(p + 1, d02);
-        MT::store_vec(p + 2, d03);
-        MT::store_vec(p + 3, d04);
+        VM::store_vec(p + 0, d01);
+        VM::store_vec(p + 1, d02);
+        VM::store_vec(p + 2, d03);
+        VM::store_vec(p + 3, d04);
     }
 
     // We jump into the middle of the loop just for one last-time
@@ -79,25 +79,25 @@ struct bitonic {
     p_exit_loop = nullptr;
     switch (last_chunk_v) {
         case 1:
-            d04 = d03 = d02 = MT::broadcast(MAX);
-            d01 = MT::load_masked_vec(p + 0, d02, mask);
+            d04 = d03 = d02 = VM::broadcast(MAX);
+            d01 = VM::load_masked_vec(p + 0, d02, mask);
             last_chunk_v = 0; p = slack; goto ugly_hack_1;
         case 2:
-            d04 = d03 = MT::broadcast(MAX);
-            d01 = MT::load_vec(p + 0);
-            d02 = MT::load_masked_vec(p + 1, d03, mask);
+            d04 = d03 = VM::broadcast(MAX);
+            d01 = VM::load_vec(p + 0);
+            d02 = VM::load_masked_vec(p + 1, d03, mask);
             last_chunk_v = 0; p = slack; goto ugly_hack_1;
         case 3:
-            d04 = MT::broadcast(MAX);
-            d01 = MT::load_vec(p + 0);
-            d02 = MT::load_vec(p + 1);
-            d03 = MT::load_masked_vec(p + 2, d04, mask);
+            d04 = VM::broadcast(MAX);
+            d01 = VM::load_vec(p + 0);
+            d02 = VM::load_vec(p + 1);
+            d03 = VM::load_masked_vec(p + 2, d04, mask);
             last_chunk_v = 0; p = slack; goto ugly_hack_1;
         case 4:
-            d01 = MT::load_vec(p + 0);
-            d02 = MT::load_vec(p + 1);
-            d03 = MT::load_vec(p + 2);
-            d04 = MT::load_masked_vec(p + 3, MT::broadcast(MAX), mask);
+            d01 = VM::load_vec(p + 0);
+            d02 = VM::load_vec(p + 1);
+            d03 = VM::load_vec(p + 2);
+            d04 = VM::load_masked_vec(p + 3, VM::broadcast(MAX), mask);
             last_chunk_v = 0; p = slack; goto ugly_hack_1;
     }
     last_chunk_v = slack_v;
@@ -123,29 +123,29 @@ struct bitonic {
 
                 TV dl, dr;
 
-                dl = MT::load_vec(p1 - 0);
-                dr = MT::load_vec(p2 + 0);
+                dl = VM::load_vec(p1 - 0);
+                dr = VM::load_vec(p2 + 0);
                 BM::cross_min_max(dl, dr);
-                MT::store_vec(p1 - 0, dl);
-                MT::store_vec(p2 + 0, dr);
+                VM::store_vec(p1 - 0, dl);
+                VM::store_vec(p2 + 0, dr);
 
-                dl = MT::load_vec(p1 - 1);
-                dr = MT::load_vec(p2 + 1);
+                dl = VM::load_vec(p1 - 1);
+                dr = VM::load_vec(p2 + 1);
                 BM::cross_min_max(dl, dr);
-                MT::store_vec(p1 - 1, dl);
-                MT::store_vec(p2 + 1, dr);
+                VM::store_vec(p1 - 1, dl);
+                VM::store_vec(p2 + 1, dr);
 
-                dl = MT::load_vec(p1 - 2);
-                dr = MT::load_vec(p2 + 2);
+                dl = VM::load_vec(p1 - 2);
+                dr = VM::load_vec(p2 + 2);
                 BM::cross_min_max(dl, dr);
-                MT::store_vec(p1 - 2, dl);
-                MT::store_vec(p2 + 2, dr);
+                VM::store_vec(p1 - 2, dl);
+                VM::store_vec(p2 + 2, dr);
 
-                dl = MT::load_vec(p1 - 3);
-                dr = MT::load_vec(p2 + 3);
+                dl = VM::load_vec(p1 - 3);
+                dr = VM::load_vec(p2 + 3);
                 BM::cross_min_max(dl, dr);
-                MT::store_vec(p1 - 3, dl);
-                MT::store_vec(p2 + 3, dr);
+                VM::store_vec(p1 - 3, dl);
+                VM::store_vec(p2 + 3, dr);
             }
         }
 
@@ -165,44 +165,44 @@ struct bitonic {
 
                     TV dl, dr;
 
-                    dl = MT::load_vec(p1 + 0);
-                    dr = MT::load_vec(p2 + 0);
+                    dl = VM::load_vec(p1 + 0);
+                    dr = VM::load_vec(p2 + 0);
                     BM::strided_min_max(dl, dr);
-                    MT::store_vec(p1 + 0, dl);
-                    MT::store_vec(p2 + 0, dr);
+                    VM::store_vec(p1 + 0, dl);
+                    VM::store_vec(p2 + 0, dr);
 
-                    dl = MT::load_vec(p1 + 1);
-                    dr = MT::load_vec(p2 + 1);
+                    dl = VM::load_vec(p1 + 1);
+                    dr = VM::load_vec(p2 + 1);
                     BM::strided_min_max(dl, dr);
-                    MT::store_vec(p1 + 1, dl);
-                    MT::store_vec(p2 + 1, dr);
+                    VM::store_vec(p1 + 1, dl);
+                    VM::store_vec(p2 + 1, dr);
 
-                    dl = MT::load_vec(p1 + 2);
-                    dr = MT::load_vec(p2 + 2);
+                    dl = VM::load_vec(p1 + 2);
+                    dr = VM::load_vec(p2 + 2);
                     BM::strided_min_max(dl, dr);
-                    MT::store_vec(p1 + 2, dl);
-                    MT::store_vec(p2 + 2, dr);
+                    VM::store_vec(p1 + 2, dl);
+                    VM::store_vec(p2 + 2, dr);
 
-                    dl = MT::load_vec(p1 + 3);
-                    dr = MT::load_vec(p2 + 3);
+                    dl = VM::load_vec(p1 + 3);
+                    dr = VM::load_vec(p2 + 3);
                     BM::strided_min_max(dl, dr);
-                    MT::store_vec(p1 + 3, dl);
-                    MT::store_vec(p2 + 3, dr);
+                    VM::store_vec(p1 + 3, dl);
+                    VM::store_vec(p2 + 3, dr);
                 }
             }
         }
         p = p_start;
         for (; p < p_exit_loop; p += 4) {
             ugly_hack_4:
-            d01 = MT::load_vec(p + 0);
-            d02 = MT::load_vec(p + 1);
-            d03 = MT::load_vec(p + 2);
-            d04 = MT::load_vec(p + 3);
+            d01 = VM::load_vec(p + 0);
+            d02 = VM::load_vec(p + 1);
+            d03 = VM::load_vec(p + 2);
+            d04 = VM::load_vec(p + 3);
             BM::merge_04v_ascending(d01, d02, d03, d04);
-            MT::store_vec(p + 0, d01);
-            MT::store_vec(p + 1, d02);
-            MT::store_vec(p + 2, d03);
-            MT::store_vec(p + 3, d04);
+            VM::store_vec(p + 0, d01);
+            VM::store_vec(p + 1, d02);
+            VM::store_vec(p + 2, d03);
+            VM::store_vec(p + 3, d04);
         }
         if (last_chunk_v > 0) {
             p = slack;
@@ -219,32 +219,32 @@ struct bitonic {
         case 0:
             break;
         case 1:
-            d01 = MT::load_vec(slack + 0);
-            MT::store_masked_vec(p_end_inplace + 0, d01, mask);
+            d01 = VM::load_vec(slack + 0);
+            VM::store_masked_vec(p_end_inplace + 0, d01, mask);
         break;
         case 2:
-            d01 = MT::load_vec(slack + 0);
-            d02 = MT::load_vec(slack + 1);
-            MT::store_vec(p_end_inplace + 0, d01);
-            MT::store_masked_vec(p_end_inplace + 1, d02, mask);
+            d01 = VM::load_vec(slack + 0);
+            d02 = VM::load_vec(slack + 1);
+            VM::store_vec(p_end_inplace + 0, d01);
+            VM::store_masked_vec(p_end_inplace + 1, d02, mask);
         break;
         case 3:
-            d01 = MT::load_vec(slack + 0);
-            d02 = MT::load_vec(slack + 1);
-            d03 = MT::load_vec(slack + 2);
-            MT::store_vec(p_end_inplace + 0, d01);
-            MT::store_vec(p_end_inplace + 1, d02);
-            MT::store_masked_vec(p_end_inplace + 2, d03, mask);
+            d01 = VM::load_vec(slack + 0);
+            d02 = VM::load_vec(slack + 1);
+            d03 = VM::load_vec(slack + 2);
+            VM::store_vec(p_end_inplace + 0, d01);
+            VM::store_vec(p_end_inplace + 1, d02);
+            VM::store_masked_vec(p_end_inplace + 2, d03, mask);
         break;
         case 4:
-            d01 = MT::load_vec(slack + 0);
-            d02 = MT::load_vec(slack + 1);
-            d03 = MT::load_vec(slack + 2);
-            d04 = MT::load_vec(slack + 3);
-            MT::store_vec(p_end_inplace + 0, d01);
-            MT::store_vec(p_end_inplace + 1, d02);
-            MT::store_vec(p_end_inplace + 2, d03);
-            MT::store_masked_vec(p_end_inplace + 3, d04, mask);
+            d01 = VM::load_vec(slack + 0);
+            d02 = VM::load_vec(slack + 1);
+            d03 = VM::load_vec(slack + 2);
+            d04 = VM::load_vec(slack + 3);
+            VM::store_vec(p_end_inplace + 0, d01);
+            VM::store_vec(p_end_inplace + 1, d02);
+            VM::store_vec(p_end_inplace + 2, d03);
+            VM::store_masked_vec(p_end_inplace + 3, d04, mask);
         break;
     }
 }

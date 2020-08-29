@@ -45,10 +45,10 @@ class vxsort {
     static_assert(Unroll <= 12, "Unroll can be in the range 1..12");
 
 private:
-    using MT = vxsort_machine_traits<T, M>;
-    typedef typename MT::TPACK TPACK;
-    using MT_PACKED = vxsort_machine_traits<TPACK, M>;
-    typedef typename MT::TV TV;
+    using VM = vxsort_machine_traits<T, M>;
+    typedef typename VM::TPACK TPACK;
+    using VM_PACKED = vxsort_machine_traits<TPACK, M>;
+    typedef typename VM::TV TV;
     typedef alignment_hint<sizeof(TV)> AH;
 
     static const int ELEMENT_ALIGN = sizeof(T) - 1;
@@ -107,7 +107,7 @@ private:
 
     static void heap_sort(T* lo, T* hi) {
         size_t n = hi - lo + 1;
-        for (size_t i = n / 2; i >= 1; i--) {
+        for (auto i = n / 2; i >= 1; i--) {
             down_heap(i, n, lo);
         }
         for (size_t i = n; i > 1; i--) {
@@ -117,9 +117,8 @@ private:
     }
     static void down_heap(size_t i, size_t n, T* lo) {
         auto d = *(lo + i - 1);
-        size_t child;
         while (i <= n / 2) {
-            child = 2 * i;
+            auto child = 2 * i;
             if (child < n && *(lo + child - 1) < (*(lo + child))) {
                 child++;
             }
@@ -138,7 +137,7 @@ private:
         if (((size_t)read_left & ALIGN_MASK) == 0)
             return read_left;
 
-        auto next_align = (T*)(((size_t)read_left + ALIGN) & ~ALIGN_MASK);
+        auto* next_align = (T*)(((size_t)read_left + ALIGN) & ~ALIGN_MASK);
         while (read_left < next_align) {
             auto v = *(read_left++);
             if (v <= pivot) {
@@ -157,7 +156,7 @@ private:
         if (((size_t) readRight & ALIGN_MASK) == 0)
             return readRight;
 
-        auto nextAlign = (T *) ((size_t) readRight & ~ALIGN_MASK);
+        auto* nextAlign = (T *) ((size_t) readRight & ~ALIGN_MASK);
         while (readRight > nextAlign) {
             auto v = *(--readRight);
             if (v <= pivot) {
@@ -170,9 +169,10 @@ private:
         return readRight;
     }
 
-    void sort(T* left, T* right, T left_hint, T right_hint, AH realign_hint,
-              int depth_limit) {
-        auto length = (size_t)(right - left + 1);
+    void sort(T* left, T* right,
+              T left_hint, T right_hint,
+              AH realign_hint, int depth_limit) {
+        auto length = static_cast<size_t>(right - left + 1);
 
         T* mid;
         switch (length) {
@@ -197,7 +197,7 @@ private:
             vxsort_stats<T>::record_small_sort_size(length);
 #endif
 
-            const auto aligned_left = reinterpret_cast<T *>(reinterpret_cast<uintptr_t>(left) & ~(N - 1));
+            auto* const aligned_left = reinterpret_cast<T *>(reinterpret_cast<uintptr_t>(left) & ~(N - 1));
             if (aligned_left < _startPtr) {
                 smallsort::bitonic<T, M>::sort(left, length);
                 return;
@@ -243,7 +243,7 @@ private:
             // * See it would cause us an out-of bounds read
             // * Since we'd like to avoid that, we adjust for post-alignment
             // * No branches since we do branch->arithmetic
-            auto preAlignedLeft = reinterpret_cast<T*>(reinterpret_cast<size_t>(left) & ~ALIGN_MASK);
+            auto* preAlignedLeft = reinterpret_cast<T*>(reinterpret_cast<size_t>(left) & ~ALIGN_MASK);
             auto cannotPreAlignLeft = (preAlignedLeft - _startPtr) >> 63;
             realign_hint.left_align = (preAlignedLeft - left) + (N & cannotPreAlignLeft);
             assert(realign_hint.left_align >= -N && realign_hint.left_align <= N);
@@ -255,7 +255,7 @@ private:
             // right is pointing just PAST the last element we intend to partition
             // (it's pointing to where we will store the pivot!) So we calculate alignment based on
             // right - 1
-            auto preAlignedRight = reinterpret_cast<T*>(((reinterpret_cast<size_t>(right) - 1) & ~ALIGN_MASK) + ALIGN);
+            auto* preAlignedRight = reinterpret_cast<T*>(((reinterpret_cast<size_t>(right) - 1) & ~ALIGN_MASK) + ALIGN);
             auto cannotPreAlignRight = (_endPtr - preAlignedRight) >> 63;
             realign_hint.right_align = (preAlignedRight - right - (N & cannotPreAlignRight));
             assert(realign_hint.right_align >= -N && realign_hint.right_align <= N);
@@ -272,19 +272,40 @@ private:
         // Pivot is mid, place it in the right hand side
         swap(mid, right);
 
-        if (MT::supports_packing()) {
-            if (MT::template can_pack<Shift>(right_hint - left_hint)) {
+
+        // Some types (e.g. integers) can be potentially packed to a lower bit width while being partitioned.
+        // For vxsort to be able to take advantage of this, it needs to know what is the maximal/minimal value
+        // that it will encountered within this partition. If the span between that min/max is smaller-or-equal to
+        // the largest value that can be expressed by the next smaller bit-width, we're good to go.
+        //
+        // Example: If we are dealing with int64_t types, but with a min/max span that happens to fall below-or-equal
+        // to 2^32, then this means we can pack the entire partition to take 1/2 of it's space in memory+cache
+        // and proceed to sort it with the new, more efficient bit-width.
+        //
+        // If we think of this naively, we might conclude there is easy way of knowing the min/max range without having
+        // the caller of the sort function let us explicitly know this by supplying the min/max values.
+        // And while that is the most preferable method which allows for earlier packing throughout the sorting effort
+        // we can also pull this off without those hints.
+        // any internal partition will has elements to its right and left that are, by definition SMALLER/LARGER than whatever
+        // we have tucked away inside out internal partition.
+        // Therefore, by sampling those values we have a "proxy" of the min/max
+        // of the current partition limits. The values sampled from the exterior of an internal partition will not represent
+        // the TRUE min/max of the current partition, but it doesn't have to be!
+        // At some point, we will statistically hit upon success here: We just need for the sampled values to be smaller than
+        // the next bit-width span at some point to be able to safely opt-in to the faster code-path.
+        if (VM::supports_packing()) {
+            if (VM::template can_pack<Shift>(right_hint - left_hint)) {
                 auto left_length = vectorized_packed_partition(left, right, left_hint, realign_hint);
                 auto right_length = length - left_length;
 
-                const auto left_packed = reinterpret_cast<TPACK *>(left);
-                const auto right_packed = reinterpret_cast<TPACK *>(right);
+                auto* const left_packed = reinterpret_cast<TPACK *>(left);
+                auto* const right_packed = reinterpret_cast<TPACK *>(right);
 
                 auto packed_sorter = vxsort<TPACK, M, Unroll>();
                 packed_sorter.sort(left_packed, left_packed + left_length - 1);
                 packed_sorter.sort(right_packed + 1 - right_length, right_packed);
-                vectorized_unpack_from_edge<Backward, 2>(left_packed, left_length, left_hint);
-                vectorized_unpack_from_edge<Forward, 2>(right_packed, right_length, left_hint);
+                //vectorized_unpack_from_edge<Left, 2>(left_packed, left_length, left_hint);
+                //vectorized_unpack_from_edge<Right, 2>(right_packed, right_length, left_hint);
                 //packer<T, TPACK, M, Shift, 2, SMALL_SORT_THRESHOLD_ELEMENTS>::unpack((TPACK *) left, length, left_hint);
                 return;
             }
@@ -309,7 +330,7 @@ private:
         vxsort_stats<T>::bump_vec_loads();
         vxsort_stats<T>::bump_vec_stores(2);
 #endif
-      if (MT::supports_compress_writes()) {
+      if (VM::supports_compress_writes()) {
         partition_block_with_compress(data_vec, P, left, right);
       } else {
         partition_block_without_compress(data_vec, P, left, right);
@@ -323,10 +344,10 @@ private:
 #ifdef VXSORT_STATS
         vxsort_stats<T>::bump_perms();
 #endif
-        auto mask = MT::get_cmpgt_mask(data_vec, P);
-        data_vec = MT::partition_vector(data_vec, mask);
-        MT::store_vec(reinterpret_cast<TV*>(left), data_vec);
-        MT::store_vec(reinterpret_cast<TV*>(right), data_vec);
+        auto mask = VM::get_cmpgt_mask(data_vec, P);
+        data_vec = VM::partition_vector(data_vec, mask);
+        VM::store_vec(reinterpret_cast<TV*>(left), data_vec);
+        VM::store_vec(reinterpret_cast<TV*>(right), data_vec);
         auto popCount = -_mm_popcnt_u64(mask);
         right += popCount;
         left += popCount + N;
@@ -336,10 +357,10 @@ private:
                                                      const TV P,
                                                      T*& left,
                                                      T*& right) {
-        auto mask = MT::get_cmpgt_mask(data_vec, P);
+        auto mask = VM::get_cmpgt_mask(data_vec, P);
         auto popCount = -_mm_popcnt_u64(mask);
-        MT::store_compress_vec(reinterpret_cast<TV*>(left), data_vec, ~mask);
-        MT::store_compress_vec(reinterpret_cast<TV*>(right + N + popCount), data_vec, mask);
+        VM::store_compress_vec(reinterpret_cast<TV*>(left), data_vec, ~mask);
+        VM::store_compress_vec(reinterpret_cast<TV*>(right + N + popCount), data_vec, mask);
         right += popCount;
         left += popCount + N;
     }
@@ -395,7 +416,7 @@ private:
         *right = std::numeric_limits<T>::max();
 
         // Broadcast the selected pivot
-        const TV P = MT::broadcast(pivot);
+        const TV P = VM::broadcast(pivot);
 
         auto readLeft = left;
         auto readRight = right;
@@ -446,8 +467,8 @@ private:
         #endif
 
         for (auto u = 0; u < InnerUnroll; u++) {
-            auto dl = MT::load_vec(readLeftV + u);
-            auto dr = MT::load_vec(readRightV - (u + 1));
+            auto dl = VM::load_vec(readLeftV + u);
+            auto dr = VM::load_vec(readRightV - (u + 1));
             partition_block(dl, P, tmp_left, tmp_right);
             partition_block(dr, P, tmp_left, tmp_right);
         }
@@ -474,18 +495,18 @@ private:
             TV d01, d02, d03, d04, d05, d06, d07, d08, d09, d10, d11, d12;
 
             switch (InnerUnroll) {
-                case 12: d12 = MT::load_vec(nextPtr + InnerUnroll - 12);
-                case 11: d11 = MT::load_vec(nextPtr + InnerUnroll - 11);
-                case 10: d10 = MT::load_vec(nextPtr + InnerUnroll - 10);
-                case  9: d09 = MT::load_vec(nextPtr + InnerUnroll -  9);
-                case  8: d08 = MT::load_vec(nextPtr + InnerUnroll -  8);
-                case  7: d07 = MT::load_vec(nextPtr + InnerUnroll -  7);
-                case  6: d06 = MT::load_vec(nextPtr + InnerUnroll -  6);
-                case  5: d05 = MT::load_vec(nextPtr + InnerUnroll -  5);
-                case  4: d04 = MT::load_vec(nextPtr + InnerUnroll -  4);
-                case  3: d03 = MT::load_vec(nextPtr + InnerUnroll -  3);
-                case  2: d02 = MT::load_vec(nextPtr + InnerUnroll -  2);
-                case  1: d01 = MT::load_vec(nextPtr + InnerUnroll -  1);
+                case 12: d12 = VM::load_vec(nextPtr + InnerUnroll - 12);
+                case 11: d11 = VM::load_vec(nextPtr + InnerUnroll - 11);
+                case 10: d10 = VM::load_vec(nextPtr + InnerUnroll - 10);
+                case  9: d09 = VM::load_vec(nextPtr + InnerUnroll -  9);
+                case  8: d08 = VM::load_vec(nextPtr + InnerUnroll -  8);
+                case  7: d07 = VM::load_vec(nextPtr + InnerUnroll -  7);
+                case  6: d06 = VM::load_vec(nextPtr + InnerUnroll -  6);
+                case  5: d05 = VM::load_vec(nextPtr + InnerUnroll -  5);
+                case  4: d04 = VM::load_vec(nextPtr + InnerUnroll -  4);
+                case  3: d03 = VM::load_vec(nextPtr + InnerUnroll -  3);
+                case  2: d02 = VM::load_vec(nextPtr + InnerUnroll -  2);
+                case  1: d01 = VM::load_vec(nextPtr + InnerUnroll -  1);
             }
 
             switch (InnerUnroll) {
@@ -516,7 +537,7 @@ private:
                 readLeftV += 1;
             }
 
-            auto d = MT::load_vec(nextPtr);
+            auto d = VM::load_vec(nextPtr);
             partition_block(d, P, writeLeft, writeRight);
             //partition_block_without_compress(d, P, writeLeft, writeRight);
         }
@@ -552,17 +573,17 @@ private:
         *right = std::numeric_limits<T>::max();
 
         // Broadcast the selected pivot
-        T offset = MT::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
-        const TV P = MT::broadcast(pivot);
-        const TV BV = MT::broadcast(offset);
+        T offset = VM::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
+        const TV P = VM::broadcast(pivot);
+        const TV BV = VM::broadcast(offset);
 
-        auto readLeft = left;
-        auto readRight = right;
+        auto* read_left = left;
+        auto* read_right = right;
 
-        auto tmp_start_left = _temp;
-        auto tmp_left = tmp_start_left;
-        auto tmp_start_right = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
-        auto tmp_right = tmp_start_right;
+        auto* tmp_start_left = _temp;
+        auto* tmp_left = tmp_start_left;
+        auto* tmp_start_right = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
+        auto* tmp_right = tmp_start_right;
 
         tmp_right -= N;
 
@@ -572,50 +593,50 @@ private:
         // Once that happens, we can read with Avx.LoadAlignedVector256
         // And also know for sure that our reads will never cross cache-lines
         // Otherwise, 50% of our AVX2 Loads will need to read from two cache-lines
-        align_vectorized(left, right, hint, P, readLeft, readRight, tmp_start_left, tmp_left, tmp_start_right, tmp_right);
+        align_vectorized(left, right, hint, P, read_left, read_right, tmp_start_left, tmp_left, tmp_start_right, tmp_right);
 
-        const auto leftAlign = hint.left_align;
-        const auto rightAlign = hint.right_align;
-        if (leftAlign > 0) {
+        const auto left_align = hint.left_align;
+        const auto right_align = hint.right_align;
+        if (left_align > 0) {
             tmp_right += N;
-            readLeft = align_left_scalar_uncommon(readLeft, pivot, tmp_left, tmp_right);
+            read_left = align_left_scalar_uncommon(read_left, pivot, tmp_left, tmp_right);
             tmp_right -= N;
         }
 
-        if (rightAlign < 0) {
+        if (right_align < 0) {
             tmp_right += N;
-            readRight =
-                align_right_scalar_uncommon(readRight, pivot, tmp_left, tmp_right);
+            read_right =
+                align_right_scalar_uncommon(read_right, pivot, tmp_left, tmp_right);
             tmp_right -= N;
         }
 
-        assert(((size_t)readLeft & ALIGN_MASK) == 0);
-        assert(((size_t)readRight & ALIGN_MASK) == 0);
+        assert(((size_t)read_left & ALIGN_MASK) == 0);
+        assert(((size_t)read_right & ALIGN_MASK) == 0);
 
-        assert((((size_t)readRight - (size_t)readLeft) % ALIGN) == 0);
+        assert((((size_t)read_right - (size_t)read_left) % ALIGN) == 0);
         //assert((readRight - readLeft) >= InnerUnroll * 2);
 
         // From now on, we are fully aligned
         // and all reading is done in full vector units
-        auto read_left_v = (TV*) readLeft;
-        auto read_right_v = (TV*) readRight;
+        auto read_left_v = reinterpret_cast<TV*>(read_left);
+        auto read_right_v = reinterpret_cast<TV*>(read_right);
 #ifndef NDEBUG
         readLeft = nullptr;
         readRight = nullptr;
 #endif
 
-        auto write_left = (TPACK *) left;
-        auto write_right = (TPACK *) right - 2*N;
+        auto* write_left = reinterpret_cast<TPACK*>(left);
+        auto* write_right = reinterpret_cast<TPACK*>(right) - 2 * N;
 
         // We will be packing before partitioning, so
-        // We must gnerate a pre-packed pivot
-        const auto packed_pivot = MT::template shift_n_sub<Shift>(pivot, offset);
-        const TV PPP = MT_PACKED::broadcast(static_cast<TPACK>(packed_pivot));
+        // We must generate a pre-packed pivot
+        const auto packed_pivot = VM::template shift_n_sub<Shift>(pivot, offset);
+        const TV PPP = VM_PACKED::broadcast(static_cast<TPACK>(packed_pivot));
 
-        auto lenv = read_right_v - read_left_v;
-        auto len_dv = lenv / 2;
+        auto len_v = read_right_v - read_left_v;
+        auto len_dv = len_v / 2;
 
-        lenv -= len_dv * 2;
+        len_v -= len_dv * 2;
 
 #ifdef VXSORT_STATS
         vxsort_stats<T>::bump_vec_loads(2 * len_dv);
@@ -623,66 +644,66 @@ private:
 #endif
 
         for (auto i = 0; i < len_dv; i++) {
-            auto dl = MT::load_vec(read_left_v + i);
-            auto dr = MT::load_vec(read_right_v - (i + 1));
+            auto dl = VM::load_vec(read_left_v + i);
+            auto dr = VM::load_vec(read_right_v - (i + 1));
 
 
             if (Shift > 0) { // This is statically compiled in/out
-                dl = MT::shift_right(dl, Shift);
-                dr = MT::shift_right(dr, Shift);
+                dl = VM::shift_right(dl, Shift);
+                dr = VM::shift_right(dr, Shift);
             }
-            dl = MT::sub(dl, BV);
-            dr = MT::sub(dr, BV);
+            dl = VM::sub(dl, BV);
+            dr = VM::sub(dr, BV);
 
-            auto packed_data = MT::pack_unordered(dl, dr);
+            auto packed_data = VM::pack_unordered(dl, dr);
 
             vxsort<TPACK, M, Unroll>::partition_block(packed_data, PPP, write_left, write_right);
         }
 
         // We might have one more vector worth of stuff to partition, so we'll do it with
         // scalar partitioning into the tmp space
-        if (lenv > 0) {
-            auto slack = MT::load_vec((TV *) (read_left_v + len_dv));
+        if (len_v > 0) {
+            auto slack = VM::load_vec((TV *) (read_left_v + len_dv));
             partition_block(slack, P, tmp_left, tmp_right);
         }
 
         write_right += 2*N;
 
-        for (auto p = tmp_start_left; p < tmp_left; p++) {
-            *(write_left++) = static_cast<TPACK>(MT::template shift_n_sub<Shift>(*p, offset));
+        for (auto *p = tmp_start_left; p < tmp_left; p++) {
+            *(write_left++) = static_cast<TPACK>(VM::template shift_n_sub<Shift>(*p, offset));
         }
 
-        for (auto p = tmp_right; p < tmp_start_right; p++) {
-            *(--write_right) = static_cast<TPACK>(MT::template shift_n_sub<Shift>(*p, offset));
+        for (auto *p = tmp_right; p < tmp_start_right; p++) {
+            *(--write_right) = static_cast<TPACK>(VM::template shift_n_sub<Shift>(*p, offset));
         }
 
         *write_left++ = static_cast<TPACK>(packed_pivot);
 
-        return write_left - ((TPACK *) left);
+        return write_left - reinterpret_cast<TPACK*>(left);
     }
 
     enum UnpackDirection {
-        Backward = -1,
-        Forward = 1,
+        Left = -1,
+        None = 0,
+        Right = 1,
     };
 
     static NOINLINE void unpack_vectorized(const TV baseVec, TV d01, TV& u01, TV& u02) {
-        MT::unpack_ordered(d01, u01, u02);
+        VM::unpack_ordered(d01, u01, u02);
 
-        u01 = MT::add(u01, baseVec);
-        u02 = MT::add(u02, baseVec);
+        u01 = VM::add(u01, baseVec);
+        u02 = VM::add(u02, baseVec);
 
         if (Shift > 0) { // This is statically compiled in/out
-            u01 = MT::shift_left(u01, Shift);
-            u02 = MT::shift_left(u02, Shift);
+            u01 = VM::shift_left(u01, Shift);
+            u02 = VM::shift_left(u02, Shift);
         }
     }
 
-
     template<UnpackDirection Dir, int UnpackUnroll>
     void vectorized_unpack_from_edge(TPACK* const mem, size_t len, T base) {
-        T offset = MT::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
-        auto baseVec = MT::broadcast(offset);
+        T offset = VM::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
+        auto baseVec = VM::broadcast(offset);
 
         auto mem_read = mem + len;
         auto mem_write = ((T *) mem) + len;
@@ -692,7 +713,7 @@ private:
         if (pre_aligned_mem < mem_read) {
             len -= (mem_read - pre_aligned_mem);
             while (mem_read > pre_aligned_mem) {
-                *(--mem_write) = MT::template unshift_and_add<Shift>(*(--mem_read), offset);
+                *(--mem_write) = VM::template unshift_and_add<Shift>(*(--mem_read), offset);
             }
         }
 
@@ -710,32 +731,32 @@ private:
             TV u01, u02, u03, u04, u05, u06, u07, u08;
 
             do {
-                d01 = MT::load_vec(memv_read + 0);
+                d01 = VM::load_vec(memv_read + 0);
                 if (UnpackUnroll == 1) break;
-                d02 = MT::load_vec(memv_read - 1);
+                d02 = VM::load_vec(memv_read - 1);
                 if (UnpackUnroll == 2) break;
-                d03 = MT::load_vec(memv_read - 2);
+                d03 = VM::load_vec(memv_read - 2);
                 if (UnpackUnroll == 3) break;
-                d04 = MT::load_vec(memv_read - 3);
+                d04 = VM::load_vec(memv_read - 3);
                 break;
             } while(true);
 
             do {
                 unpack_vectorized(baseVec, d01, u01, u02);
-                MT::store_vec(memv_write + 0, u01);
-                MT::store_vec(memv_write + 1, u02);
+                VM::store_vec(memv_write + 0, u01);
+                VM::store_vec(memv_write + 1, u02);
                 if (UnpackUnroll == 1) break;
                 unpack_vectorized(baseVec, d02, u03, u04);
-                MT::store_vec(memv_write - 2, u03);
-                MT::store_vec(memv_write - 1, u04);
+                VM::store_vec(memv_write - 2, u03);
+                VM::store_vec(memv_write - 1, u04);
                 if (UnpackUnroll == 2) break;
                 unpack_vectorized(baseVec, d03, u05, u06);
-                MT::store_vec(memv_write - 4, u05);
-                MT::store_vec(memv_write - 3, u06);
+                VM::store_vec(memv_write - 4, u05);
+                VM::store_vec(memv_write - 3, u06);
                 if (UnpackUnroll == 3) break;
                 unpack_vectorized(baseVec, d04, u07, u08);
-                MT::store_vec(memv_write - 6, u07);
-                MT::store_vec(memv_write - 5, u08);
+                VM::store_vec(memv_write - 6, u07);
+                VM::store_vec(memv_write - 5, u08);
                 break;
             } while(true);
 
@@ -751,11 +772,11 @@ private:
                 TV d01;
                 TV u01, u02;
 
-                d01 = MT::load_vec(memv_read + 0);
+                d01 = VM::load_vec(memv_read + 0);
 
                 unpack_vectorized(baseVec, d01, u01, u02);
-                MT::store_vec(memv_write + 0, u01);
-                MT::store_vec(memv_write + 1, u02);
+                VM::store_vec(memv_write + 0, u01);
+                VM::store_vec(memv_write + 1, u02);
 
                 memv_read--;
                 memv_write -= 2;
@@ -767,7 +788,7 @@ private:
         mem_write = (T *) (memv_write + 2);
 
         while (len-- > 0) {
-            *(--mem_write) = MT::template unshift_and_add<Shift>(*(--mem_read), offset);
+            *(--mem_write) = VM::template unshift_and_add<Shift>(*(--mem_read), offset);
         }
     }
 
@@ -805,29 +826,29 @@ private:
         //       were actually needed to be written to the right hand side
         //    e) We write the right portion of the left vector to the right side
         //       now that its write position has been updated
-        auto RT0 = MT::load_vec(pre_aligned_right);
-        auto LT0 = MT::load_vec(pre_aligned_left);
-        auto rtMask = MT::get_cmpgt_mask(RT0, P);
-        auto ltMask = MT::get_cmpgt_mask(LT0, P);
+        auto RT0 = VM::load_vec(pre_aligned_right);
+        auto LT0 = VM::load_vec(pre_aligned_left);
+        auto rtMask = VM::get_cmpgt_mask(RT0, P);
+        auto ltMask = VM::get_cmpgt_mask(LT0, P);
         const auto rtPopCountRightPart = std::max(_mm_popcnt_u32(rtMask), right_align);
         const auto ltPopCountRightPart = _mm_popcnt_u32(ltMask);
         const auto rtPopCountLeftPart  = N - rtPopCountRightPart;
         const auto ltPopCountLeftPart  = N - ltPopCountRightPart;
 
-        if (MT::supports_compress_writes()) {
-          MT::store_compress_vec((TV *) (tmpRight + N - rtPopCountRightPart), RT0, rtMask);
-          MT::store_compress_vec((TV *) tmpLeft,  LT0, ~ltMask);
+        if (VM::supports_compress_writes()) {
+          VM::store_compress_vec((TV *) (tmpRight + N - rtPopCountRightPart), RT0, rtMask);
+          VM::store_compress_vec((TV *) tmpLeft,  LT0, ~ltMask);
 
           tmpRight -= rtPopCountRightPart & rai;
           readRight += (right_align - N) & rai;
 
-          MT::store_compress_vec((TV *) (tmpRight + N - ltPopCountRightPart), LT0, ltMask);
+          VM::store_compress_vec((TV *) (tmpRight + N - ltPopCountRightPart), LT0, ltMask);
           tmpRight -= ltPopCountRightPart & lai;
           tmpLeft += ltPopCountLeftPart & lai;
           tmpStartLeft += -left_align & lai;
           readLeft += (left_align + N) & lai;
 
-          MT::store_compress_vec((TV*) tmpLeft, RT0, ~rtMask);
+          VM::store_compress_vec((TV*) tmpLeft, RT0, ~rtMask);
           tmpLeft += rtPopCountLeftPart & rai;
           tmpStartRight -= right_align & rai;
         }
@@ -835,23 +856,23 @@ private:
 #ifdef VXSORT_STATS
             vxsort_stats<T>::bump_perms(2);
 #endif
-            RT0 = MT::partition_vector(RT0, rtMask);
-            LT0 = MT::partition_vector(LT0, ltMask);
-            MT::store_vec((TV*) tmpRight, RT0);
-            MT::store_vec((TV*) tmpLeft, LT0);
+            RT0 = VM::partition_vector(RT0, rtMask);
+            LT0 = VM::partition_vector(LT0, ltMask);
+            VM::store_vec((TV*) tmpRight, RT0);
+            VM::store_vec((TV*) tmpLeft, LT0);
 
 
             tmpRight -= rtPopCountRightPart & rai;
             readRight += (right_align - N) & rai;
 
-            MT::store_vec((TV*) tmpRight, LT0);
+            VM::store_vec((TV*) tmpRight, LT0);
             tmpRight -= ltPopCountRightPart & lai;
 
             tmpLeft += ltPopCountLeftPart & lai;
             tmpStartLeft += -left_align & lai;
             readLeft += (left_align + N) & lai;
 
-            MT::store_vec((TV*) tmpLeft, RT0);
+            VM::store_vec((TV*) tmpLeft, RT0);
             tmpLeft += rtPopCountLeftPart & rai;
             tmpStartRight -= right_align & rai;
         }
