@@ -1,4 +1,6 @@
 native_size_map = {
+    "int16_t": 2,
+    "uint16_t": 2,
     "int32_t": 4,
     "uint32_t": 4,
     "float": 4,

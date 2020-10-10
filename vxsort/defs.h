@@ -43,4 +43,9 @@
 #define NOINLINE __attribute__((noinline))
 #endif
 
+namespace vxsort {
+    template <class... E>
+    constexpr bool always_false = false;
+}
+
 #endif  // VXSORT_DEFS_H

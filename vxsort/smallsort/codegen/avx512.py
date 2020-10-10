@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from typing.io import IO
 from utils import native_size_map, next_power_of_2
 from bitonic_isa import BitonicISA
 import os
@@ -17,21 +18,21 @@ class AVX512BitonicISA(BitonicISA):
             self.bitonic_size_map[t] = int(self.vector_size_in_bytes / s)
 
         self.bitonic_type_map = {
-            "int32_t": "__m512i",
+            "int32_t":  "__m512i",
             "uint32_t": "__m512i",
-            "float": "__m512",
-            "int64_t": "__m512i",
+            "float":    "__m512",
+            "int64_t":  "__m512i",
             "uint64_t": "__m512i",
-            "double": "__m512d",
+            "double":   "__m512d",
         }
 
         self.bitonic_mask_map = {
-            "int32_t": "__mmask16",
+            "int32_t":  "__mmask16",
             "uint32_t": "__mmask16",
-            "float": "__mmask16",
-            "int64_t": "__mmask8",
+            "float":    "__mmask16",
+            "int64_t":  "__mmask8",
             "uint64_t": "__mmask8",
-            "double": "__mmask8",
+            "double":   "__mmask8",
         }
 
     def max_bitonic_sort_vectors(self):
@@ -51,18 +52,18 @@ class AVX512BitonicISA(BitonicISA):
     def supported_types(cls):
         return native_size_map.keys()
 
-    def i2d(self, v):
+    def t2d(self, v):
         t = self.type
         if t == "double":
             return v
         elif t == "float":
-            raise Exception("WTF")
+            return f"i2s({v})"
         return f"i2d({v})"
 
-    def i2s(self, v):
+    def i2t(self, v):
         t = self.type
         if t == "double":
-            raise Exception("WTF")
+            return f"i2d({v})"
         elif t == "float":
             return f"i2s({v})"
         return v
@@ -90,64 +91,37 @@ class AVX512BitonicISA(BitonicISA):
         t = self.type
         return str.join(", ", list(map(lambda p: f"TV& d{p:02d}", range(1, numParams + 1))))
 
-    def generate_shuffle_S1(self, v):
+    def generate_shuffle_X1(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
         if size == 16:
-            return self.i2s(f"_mm512_shuffle_epi32({self.s2i(v)}, _MM_PERM_CDAB)")
+            return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM)  0b10'11'00'01)")
         elif size == 8:
-            return self.d2i(f"_mm512_permute_pd({self.i2d(v)}, _MM_PERM_BBBB)")
+            return self.d2i(f"_mm512_permute_pd({self.t2d(v)}, (_MM_PERM_ENUM) 0b0'1'0'1'0'1'0'1)")
+
+    def generate_shuffle_X2(self, v):
+        t = self.type
+        size = self.bitonic_size_map[t]
+        if size == 16:
+            return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+        elif size == 8:
+            return self.d2i(f"_mm512_permutex_pd({self.t2d(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
 
     def generate_shuffle_X4(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
         if size == 16:
-            return self.i2s(f"_mm512_shuffle_epi32({self.s2i(v)}, _MM_PERM_ABCD)")
+            return self.i2t(f"_mm512_permutex_epi64({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
         elif size == 8:
-            return self.d2i(f"_mm512_permutex_pd({self.i2d(v)}, _MM_PERM_ABCD)")
+            return self.d2i(f"_mm512_shuffle_f64x2({self.t2d(v)}, {self.t2d(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
 
     def generate_shuffle_X8(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
         if size == 16:
-            s1 = f"_mm512_shuffle_epi32({self.s2i(v)}, _MM_PERM_ABCD)"
-            return self.i2s(f"_mm512_permutex_epi64({s1}, _MM_PERM_BADC)")
+            return self.i2t(f"_mm512_shuffle_i64x2({self.s2i(v)}, {self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
         elif size == 8:
-            s1 = f"_mm512_permutex_pd({self.i2d(v)}, _MM_PERM_ABCD)"
-            return self.d2i(f"_mm512_shuffle_f64x2({s1}, {s1}, _MM_PERM_BADC)")
-
-    def generate_shuffle_S2(self, v):
-        t = self.type
-        size = self.bitonic_size_map[t]
-        if size == 16:
-            return self.i2s(f"_mm512_shuffle_epi32({self.s2i(v)}, _MM_PERM_BADC)")
-        elif size == 8:
-            return self.d2i(f"_mm512_permutex_pd({self.i2d(v)}, _MM_PERM_BADC)")
-
-    def generate_shuffle_X16(self, v):
-        t = self.type
-        size = self.bitonic_size_map[t]
-        if size == 16:
-            s1 = f"_mm512_shuffle_epi32({self.s2i(v)}, _MM_PERM_ABCD)"
-            return self.i2s(f"_mm512_shuffle_i64x2({s1}, {s1}, _MM_PERM_ABCD)")
-        elif size == 8:
-            return self.d2i(f"_mm512_shuffle_pd({self.i2d(v)}, {self.i2d(v)}, 0xB1)")
-
-    def generate_shuffle_S4(self, v):
-        t = self.type
-        size = self.bitonic_size_map[t]
-        if size == 16:
-            return self.i2s(f"_mm512_permutex_epi64({self.s2i(v)}, _MM_PERM_BADC)")
-        elif size == 8:
-            return self.d2i(f"_mm512_shuffle_f64x2({self.i2d(v)}, {self.i2d(v)}, _MM_PERM_BADC)")
-
-    def generate_shuffle_S8(self, v):
-        t = self.type
-        size = self.bitonic_size_map[t]
-        if size == 16:
-            return self.i2s(f"_mm512_shuffle_i64x2({self.s2i(v)}, {self.s2i(v)}, _MM_PERM_BADC)")
-        elif size == 8:
-            return self.d2i(f"_mm512_shuffle_pd({self.i2d(v)}, {self.i2d(v)}, 0xB1)")
+            return self.d2i(f"_mm512_shuffle_pd({self.t2d(v)}, {self.t2d(v)}, (_MM_PERM_ENUM) 0xB1)")
 
     def generate_min(self, v1, v2):
         t = self.type
@@ -179,35 +153,34 @@ class AVX512BitonicISA(BitonicISA):
         elif t == "double":
             return f"_mm512_max_pd({v1}, {v2})"
 
-    def generate_mask(self, stride, ascending):
-        b = 1 << stride
-        b = b - 1
-        if ascending:
-            b = b << stride
-
-        mask = 0
+    def generate_mask(self, blend: int, width: int, ascending: bool):
         size = self.vector_size()
+        mask = 0
         while size > 0:
-            mask = mask << (stride * 2) | b
-            size = size - (stride * 2)
+            mask = mask <<  width | blend
+            size = size - width
+
+        if not ascending:
+            mask = ~mask
+
+        mask = mask & ((1 << self.vector_size()) - 1)
         return mask
 
-
-    def generate_max_with_blend(self, src, v1, v2, stride, ascending):
-        mask = self.generate_mask(stride, ascending)
+    def generate_blended_max(self, src, v1, v2, blend: int, width: int, ascending: bool):
+        mask = self.generate_mask(blend, width, ascending)
         t = self.type
         if t == "int32_t":
-            return f"_mm512_mask_max_epi32({src}, 0x{mask:04X}, {v1}, {v2})"
+            return f"_mm512_mask_max_epi32({src}, 0b{mask:016b}, {v1}, {v2})"
         elif t == "uint32_t":
-            return f"_mm512_mask_max_epu32({src}, 0x{mask:04X}, {v1}, {v2})"
+            return f"_mm512_mask_max_epu32({src}, 0b{mask:016b}, {v1}, {v2})"
         elif t == "float":
-            return f"_mm512_mask_max_ps({src}, 0x{mask:04X}, {v1}, {v2})"
+            return f"_mm512_mask_max_ps({src}, 0b{mask:016b}, {v1}, {v2})"
         elif t == "int64_t":
-            return f"_mm512_mask_max_epi64({src}, 0x{mask:04X}, {v1}, {v2})"
+            return f"_mm512_mask_max_epi64({src}, 0b{mask:08b}, {v1}, {v2})"
         elif t == "uint64_t":
-            return f"_mm512_mask_max_epu64({src}, 0x{mask:04X}, {v1}, {v2})"
+            return f"_mm512_mask_max_epu64({src}, 0b{mask:08b}, {v1}, {v2})"
         elif t == "double":
-            return f"_mm512_mask_max_pd({src}, 0x{mask:04X}, {v1}, {v2})"
+            return f"_mm512_mask_max_pd({src}, 0b{mask:08b}, {v1}, {v2})"
 
     def get_load_intrinsic(self, v, offset):
         t = self.type
@@ -335,64 +308,64 @@ public:
 """
         print(s, file=f)
 
-    def generate_1v_basic_sorters(self, f, ascending):
+    def generate_1v_basic_sorters(self, f: IO, asc: bool):
         g = self
         type = self.type
-        suffix = "ascending" if ascending else "descending"
+        suffix = "ascending" if asc else "descending"
 
         s = f"""    static INLINE void sort_01v_{suffix}({g.generate_param_def_list(1)}) {{
         TV  min, s;
 
-        s = {g.generate_shuffle_S1("d01")};
+        s = {g.generate_shuffle_X1("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 1, ascending)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b0110, 4, asc)};
+
+        s = {g.generate_shuffle_X2("d01")};
+        min = {g.generate_min("s", "d01")};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b00111100, 8, asc)};
+
+        s = {g.generate_shuffle_X1("d01")};
+        min = {g.generate_min("s", "d01")};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b01011010, 8, asc)};
 
         s = {g.generate_shuffle_X4("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 2, ascending)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b0000111111110000, 16, asc)};
 
-        s = {g.generate_shuffle_S1("d01")};
+        s = {g.generate_shuffle_X2("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 1, ascending)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b0011001111001100, 16, asc)};
 
-        s = {g.generate_shuffle_X8("d01")};
+        s = {g.generate_shuffle_X1("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 4, ascending)};
-
-        s = {g.generate_shuffle_S2("d01")};
-        min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 2, ascending)};
-
-        s = {g.generate_shuffle_S1("d01")};
-        min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 1, ascending)};"""
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b0101010110101010, 16, asc)};"""
 
         print(s, file=f)
 
         if g.vector_size() == 16:
             s = f"""
-        s = {g.generate_shuffle_X16("d01")};
+        s = {g.generate_shuffle_X8("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 8, ascending)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b1111111100000000, 16, asc)};
 
-        s = {g.generate_shuffle_S4("d01")};
+        s = {g.generate_shuffle_X4("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 4, ascending)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b1111000011110000, 16, asc)};
 
-        s = {g.generate_shuffle_S2("d01")};
+        s = {g.generate_shuffle_X2("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 2, ascending)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b1100110011001100, 16, asc)};
 
-        s = {g.generate_shuffle_S1("d01")};
+        s = {g.generate_shuffle_X1("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 1, ascending)};"""
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b1010101010101010, 16, asc)};"""
             print(s, file=f)
         print("    }", file=f)
 
-    def generate_1v_merge_sorters(self, f, ascending: bool):
+    def generate_1v_merge_sorters(self, f: IO, asc: bool):
         g = self
         type = self.type
-        suffix = "ascending" if ascending else "descending"
+        suffix = "ascending" if asc else "descending"
 
         s = f"""    static INLINE void merge_01v_{suffix}({g.generate_param_def_list(1)}) {{
         TV  min, s;"""
@@ -400,36 +373,36 @@ public:
 
         if g.vector_size() == 16:
             s = f"""
-        s = {g.generate_shuffle_S8("d01")};
+        s = {g.generate_shuffle_X8("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 8, ascending)};"""
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b1111111100000000, 16, asc)};"""
             print(s, file=f)
 
         s = f"""
-        s = {g.generate_shuffle_S4("d01")};
+        s = {g.generate_shuffle_X4("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 4, ascending)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b11110000, 8, asc)};
 
-        s = {g.generate_shuffle_S2("d01")};
+        s = {g.generate_shuffle_X2("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 2, ascending)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b1100, 4, asc)};
 
-        s = {g.generate_shuffle_S1("d01")};
+        s = {g.generate_shuffle_X1("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_max_with_blend("min", "s", "d01", 1, ascending)};"""
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b10, 2, asc)};"""
 
         print(s, file=f)
         print("    }", file=f)
 
-    def generate_compounded_sorter(self, f, width, ascending, inline):
+    def generate_compounded_sorter(self, f: IO, width: int, asc: bool, inline: int):
         type = self.type
         g = self
 
         w1 = int(next_power_of_2(width) / 2)
         w2 = int(width - w1)
 
-        suffix = "ascending" if ascending else "descending"
-        rev_suffix = "descending" if ascending else "ascending"
+        suffix = "ascending" if asc else "descending"
+        rev_suffix = "descending" if asc else "ascending"
 
         inl = "INLINE" if inline else "NOINLINE"
 
@@ -456,15 +429,14 @@ public:
         print(s, file=f)
         print("    }", file=f)
 
-    def generate_compounded_merger(self, f, width, ascending, inline):
+    def generate_compounded_merger(self, f: IO, width: int, asc: bool, inline: int):
         type = self.type
         g = self
 
         w1 = int(next_power_of_2(width) / 2)
         w2 = int(width - w1)
 
-        suffix = "ascending" if ascending else "descending"
-        rev_suffix = "descending" if ascending else "ascending"
+        suffix = "ascending" if asc else "descending"
 
         inl = "INLINE" if inline else "NOINLINE"
 
@@ -486,21 +458,30 @@ public:
         print(s, file=f)
         print("    }", file=f)
 
-    def generate_cross_min_max(self, f):
+    def generate_reverse(self, v: str):
+        t = self.type
+        size = self.bitonic_size_map[t]
+        if size == 16:
+            s1 = f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b00'01'10'11)"
+            return self.i2t(f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)")
+        elif size == 8:
+            s1 = f"d2i(_mm512_permute_pd({self.t2d(v)}, (_MM_PERM_ENUM) 0b0'1'0'1'0'1'0'1))"
+            return self.i2t(f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)")
+
+    def generate_cross_min_max(self, f: IO):
         g = self
         type = self.type
-
 
         s = f"""    static INLINE void cross_min_max(TV& d01, TV& d02) {{
         TV tmp;
 
-        tmp = {g.generate_shuffle_X16("d02")};
+        tmp = {g.generate_reverse("d02")};
         d02 = {g.generate_max("d01", "tmp")};
         d01 = {g.generate_min("d01", "tmp")};
         }}"""
         print(s, file=f)
 
-    def generate_strided_min_max(self, f):
+    def generate_strided_min_max(self, f: IO):
         g = self
         type = self.type
 
@@ -513,19 +494,21 @@ public:
     }}"""
         print(s, file=f)
 
-    def generate_entry_points_old(self, f):
+    def generate_entry_points_full_vectors(self, f: IO, asc: bool):
         type = self.type
         g = self
+        sfx = "ascending" if asc else "descending"
         for m in range(1, g.max_bitonic_sort_vectors() + 1):
             s = f"""
-    static NOINLINE void sort_{m:02d}v_old({type} *ptr) {{"""
+    // This is generated for testing purposes only
+    static NOINLINE void sort_{m:02d}v_full_{sfx}({type} *ptr) {{"""
             print(s, file=f)
 
             for l in range(0, m):
                 s = f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};"
                 print(s, file=f)
 
-            s = f"        sort_{m:02d}v_ascending({g.generate_param_list(1, m)});"
+            s = f"        sort_{m:02d}v_{sfx}({g.generate_param_list(1, m)});"
             print(s, file=f)
 
             for l in range(0, m):
@@ -534,12 +517,12 @@ public:
 
             print("    }", file=f)
 
-    def generate_entry_points(self, f):
+    def generate_entry_points_partial_vectors(self, f: IO):
         type = self.type
         g = self
         for m in range(1, g.max_bitonic_sort_vectors() + 1):
             s = f"""
-    static NOINLINE void sort_{m:02d}v_alt({type} *ptr, int remainder) {{
+    static NOINLINE void sort_{m:02d}v_partial({type} *ptr, int remainder) {{
         const auto mask = 0x{((1 << self.vector_size()) - 1):X} >> ((N - remainder) & (N-1));
 """
             print(s, file=f)
@@ -562,46 +545,37 @@ public:
             print("    }", file=f)
 
 
-    def generate_master_entry_point(self, f_header, f_src):
-        basename = os.path.basename(f_header.name)
-        s = f"""#include "{basename}"
-
-using namespace vxsort;
-"""
-        print(s, file=f_src)
-
+    def generate_master_entry_point_full(self, f: IO, asc : bool):
+        basename = os.path.basename(f.name)
         t = self.type
         g = self
+        sfx = "ascending" if asc else "descending"
 
-        # s = f"""    static void sort_old({t} *ptr, size_t length);"""
-        # print(s, file=f_header)
+        s = f"""
+    // This is generated for testing purposes only
+    static NOINLINE void sort_full_vectors_{sfx}({t} *ptr, size_t length) {{
+        assert(length % N == 0);
+        switch(length / N) {{"""
+        print(s, file=f)
 
-        s = f"""    static void sort({t} *ptr, size_t length);"""
-        print(s, file=f_header)
+        for m in range(1, self.max_bitonic_sort_vectors() + 1):
+            s = f"            case {m}: sort_{m:02d}v_full_{sfx}(ptr); break;"
+            print(s, file=f)
+        print("        }", file=f)
+        print("    }", file=f)
 
 
-    #     s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX512 >::sort_old({t} *ptr, size_t length) {{
-    # switch(length / N) {{"""
+    #     s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX512 >::sort({t} *ptr, size_t length) {{
+    # const auto fullvlength = length / N;
+    # const int remainder = (int) (length - fullvlength * N);
+    # const auto v = fullvlength + ((remainder > 0) ? 1 : 0);
+    # switch(v) {{"""
     #     print(s, file=f_src)
     #
     #     for m in range(1, self.max_bitonic_sort_vectors() + 1):
-    #         s = f"        case {m}: sort_{m:02d}v(ptr); break;"
+    #         s = f"        case {m}: sort_{m:02d}v_alt(ptr, remainder); break;"
     #         print(s, file=f_src)
     #     print("    }", file=f_src)
+    #
     #     print("}", file=f_src)
-
-
-        s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX512 >::sort({t} *ptr, size_t length) {{
-    const auto fullvlength = length / N;
-    const int remainder = (int) (length - fullvlength * N);
-    const auto v = fullvlength + ((remainder > 0) ? 1 : 0);
-    switch(v) {{"""
-        print(s, file=f_src)
-
-        for m in range(1, self.max_bitonic_sort_vectors() + 1):
-            s = f"        case {m}: sort_{m:02d}v_alt(ptr, remainder); break;"
-            print(s, file=f_src)
-        print("    }", file=f_src)
-
-        print("}", file=f_src)
-        pass
+    #     pass

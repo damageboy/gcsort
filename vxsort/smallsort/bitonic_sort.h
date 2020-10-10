@@ -109,7 +109,7 @@ struct bitonic {
     int half_stride;
 
     const auto max_v = closest_pow2(v);
-    for (int i = 8; i <= max_v; i *= 2) {
+    for (uint32_t i = 8; i <= max_v; i *= 2) {
         for (p = p_start; p < p_virtual_end; p += i) {
             half_stride = i / 2;
             p1 = p + half_stride - 1;

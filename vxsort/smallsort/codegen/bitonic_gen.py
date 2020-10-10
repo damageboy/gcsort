@@ -45,19 +45,22 @@ def generate_per_type(f_header, type, vector_isa, break_inline):
             inline = True
         else:
             inline = False
-        g.generate_compounded_sorter(f_header, width, ascending=True, inline=inline)
-        g.generate_compounded_sorter(f_header, width, ascending=False, inline=inline)
+        g.generate_compounded_sorter(f_header, width, asc=True, inline=inline)
+        g.generate_compounded_sorter(f_header, width, asc=False, inline=inline)
         if width <= g.largest_merge_variant_needed():
-            g.generate_compounded_merger(f_header, width, ascending=True, inline=inline)
-            g.generate_compounded_merger(f_header, width, ascending=False, inline=inline)
+            g.generate_compounded_merger(f_header, width, asc=True, inline=inline)
+            g.generate_compounded_merger(f_header, width, asc=False, inline=inline)
 
 
     g.generate_cross_min_max(f_header)
     g.generate_strided_min_max(f_header)
 
-    #g.generate_entry_points_old(f_header)
-    #g.generate_entry_points(f_header)
-    #g.generate_master_entry_point(f_header, f_src)
+    print("\n#ifdef BITONIC_TESTS", file=f_header)
+    g.generate_entry_points_full_vectors(f_header, asc=True)
+    g.generate_entry_points_full_vectors(f_header, asc=False)
+    g.generate_master_entry_point_full(f_header, asc=True)
+    g.generate_master_entry_point_full(f_header, asc=False)
+    print("\n#endif", file=f_header)
     g.generate_epilogue(f_header)
 
 

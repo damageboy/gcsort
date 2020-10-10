@@ -621,8 +621,8 @@ private:
         auto read_left_v = reinterpret_cast<TV*>(read_left);
         auto read_right_v = reinterpret_cast<TV*>(read_right);
 #ifndef NDEBUG
-        readLeft = nullptr;
-        readRight = nullptr;
+        read_left = nullptr;
+        read_right = nullptr;
 #endif
 
         auto* write_left = reinterpret_cast<TPACK*>(left);

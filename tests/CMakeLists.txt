@@ -7,6 +7,8 @@ file(GLOB_RECURSE test_HEADERS *.h)
 
 add_executable(${TARGET_NAME} ${test_SRC} ${test_HEADERS})
 
+add_compile_definitions("BITONIC_TESTS")
+
 target_link_libraries(${TARGET_NAME}
         ${CMAKE_PROJECT_NAME}_lib
         gtest

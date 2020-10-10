@@ -59,11 +59,11 @@ class BitonicISA(ABC, metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def generate_entry_points(self, f):
+    def generate_entry_points_full_vectors(self, f, is_ascending : bool):
         pass
 
     @abstractmethod
-    def generate_master_entry_point(self, f):
+    def generate_master_entry_point_full(self, f, is_ascending : bool):
         pass
 
     @abstractmethod
