@@ -7,6 +7,8 @@
 #include "smallsort_test.h"
 
 #include <machine_traits.avx2.h>
+#include <smallsort/bitonic_machine.AVX2.int16_t.generated.h>
+#include <smallsort/bitonic_machine.AVX2.uint16_t.generated.h>
 #include <smallsort/bitonic_machine.AVX2.int32_t.generated.h>
 #include <smallsort/bitonic_machine.AVX2.uint32_t.generated.h>
 #include <smallsort/bitonic_machine.AVX2.float.generated.h>
@@ -18,6 +20,9 @@ namespace vxsort_tests {
 
 using VM = vxsort::vector_machine;
 
+
+struct BitonicMachineAVX2_i16    : public SortTest<int16_t> {};
+struct BitonicMachineAVX2_ui16   : public SortTest<uint16_t> {};
 struct BitonicMachineAVX2_i32    : public SortTest<int32_t> {};
 struct BitonicMachineAVX2_ui32   : public SortTest<uint32_t> {};
 struct BitonicMachineAVX2_float  : public SortTest<float> {};
@@ -25,9 +30,12 @@ struct BitonicMachineAVX2_i64    : public SortTest<int64_t> {};
 struct BitonicMachineAVX2_ui64   : public SortTest<uint64_t> {};
 struct BitonicMachineAVX2_double : public SortTest<double> {};
 
+auto bitonic_machine_allvalues_avx2_16 = ValuesIn(range(16, 64, 16));
 auto bitonic_machine_allvalues_avx2_32 = ValuesIn(range(8, 32, 8));
 auto bitonic_machine_allvalues_avx2_64 = ValuesIn(range(4, 16, 4));
 
+INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX2, BitonicMachineAVX2_i16,    bitonic_machine_allvalues_avx2_16, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX2, BitonicMachineAVX2_ui16,   bitonic_machine_allvalues_avx2_16, PrintValue());
 INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX2, BitonicMachineAVX2_i32,    bitonic_machine_allvalues_avx2_32, PrintValue());
 INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX2, BitonicMachineAVX2_ui32,   bitonic_machine_allvalues_avx2_32, PrintValue());
 INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX2, BitonicMachineAVX2_float,  bitonic_machine_allvalues_avx2_32, PrintValue());
@@ -35,6 +43,8 @@ INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX2, BitonicMachineAVX2_i64,    bitonic_
 INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX2, BitonicMachineAVX2_ui64,   bitonic_machine_allvalues_avx2_64, PrintValue());
 INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX2, BitonicMachineAVX2_double, bitonic_machine_allvalues_avx2_64, PrintValue());
 
+TEST_P(BitonicMachineAVX2_i16,    BitonicSortAVX2Asc) { perform_bitonic_machine_sort_test<int16_t,  VM::AVX2, true>(V); }
+TEST_P(BitonicMachineAVX2_ui16,   BitonicSortAVX2Asc) { perform_bitonic_machine_sort_test<uint16_t, VM::AVX2, true>(V); }
 TEST_P(BitonicMachineAVX2_i32,    BitonicSortAVX2Asc) { perform_bitonic_machine_sort_test<int32_t,  VM::AVX2, true>(V); }
 TEST_P(BitonicMachineAVX2_ui32,   BitonicSortAVX2Asc) { perform_bitonic_machine_sort_test<uint32_t, VM::AVX2, true>(V); }
 TEST_P(BitonicMachineAVX2_float,  BitonicSortAVX2Asc) { perform_bitonic_machine_sort_test<float,    VM::AVX2, true>(V); }

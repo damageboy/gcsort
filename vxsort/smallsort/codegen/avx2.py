@@ -1,34 +1,39 @@
 import os
 from datetime import datetime
 
-import typing
-
 from typing.io import IO
 from utils import native_size_map, next_power_of_2
 from bitonic_isa import BitonicISA
 
 
 class AVX2BitonicISA(BitonicISA):
-    def __init__(self, type):
+    bitonic_type_map = {
+        "int16_t":  "__m256i",
+        "uint16_t": "__m256i",
+        "int32_t":  "__m256i",
+        "uint32_t": "__m256i",
+        "float":    "__m256",
+        "int64_t":  "__m256i",
+        "uint64_t": "__m256i",
+        "double":   "__m256d",
+    }
+
+    REMOVE_ME = "<<<REMOVE_ME>>>"
+
+    def __init__(self, type: str, f_header: IO):
         self.vector_size_in_bytes = 32
 
         self.type = type
+        self.f_header = f_header
 
         self.bitonic_size_map = {}
 
         for t, s in native_size_map.items():
             self.bitonic_size_map[t] = int(self.vector_size_in_bytes / s)
 
-        self.bitonic_type_map = {
-            "int16_t":  "__m256i",
-            "uint16_t": "__m256i",
-            "int32_t":  "__m256i",
-            "uint32_t": "__m256i",
-            "float":    "__m256",
-            "int64_t":  "__m256i",
-            "uint64_t": "__m256i",
-            "double":   "__m256d",
-        }
+    def clean_print(self, s: str):
+        clean_lines = str.join("\n", [l for l in s.splitlines() if not AVX2BitonicISA.REMOVE_ME in l])
+        print(clean_lines, file=self.f_header)
 
     def max_bitonic_sort_vectors(self):
         return 4
@@ -41,7 +46,7 @@ class AVX2BitonicISA(BitonicISA):
 
     @classmethod
     def supported_types(cls):
-        return native_size_map.keys()
+        return __class__.bitonic_type_map.keys()
 
     def t2d(self, v: str):
         t = self.type
@@ -122,30 +127,77 @@ class AVX2BitonicISA(BitonicISA):
 
     def generate_blend_mask(self, blend: int, width: int, asc: bool):
         size = self.vector_size()
+        # There is no 16b width that can
+        # deal with 16b masks, but we shouldn't require those
+        # as so far, the 16bit masks always come in pairs/quads of 0/1
+        # bits, which means we can test for this condition and "promote" those
+        # blends to 32 bits of a mutated mask
+        if size == 16 and width == 16:
+            # Verify that the provided blend mask
+            # Can be safely promoted to a larget width blend
+            b1 = blend & 0b0101010101010101
+            b2 = blend & 0b1010101010101010
+            b2 >>= 1
+            if b1 != b2:
+                raise Exception("WTF")
+            blend = 0
+            i = 0
+            w = width
+            while w > 0:
+                blend |= (b1 & 0x1) << i
+                b1 >>= 2
+                i += 1
+                w -= 2
+            width >>= 1
+
+        # There is no blend mask above 8 bits in AVX2
+        if size == 16:
+            size = 8
+
+
         mask = 0
-        while size > 0:
+        s = size
+        while s > 0:
             mask = mask <<  width | blend
-            size = size - width
+            s -= width
 
         if not asc:
             mask = ~mask
 
-        mask = mask & ((1 << self.vector_size()) - 1)
+        mask = mask & ((1 << size) - 1)
         return mask
 
     def generate_blend(self, v1: str, v2: str, blend: int, width: int, asc: bool):
         size = self.vector_size()
+        # Hack hack hack:
+        # There is only one known case where we need something like this,
+        # So check for it or raise an exception:
+        if size == 16 and width == 16 and blend == 0b0101010110101010:
+            return self.i2t(f"_mm256_blendv_epi8({self.t2i(v1)}, {self.t2i(v2)}, x1_blend)");
+
         mask = self.generate_blend_mask(blend, width, asc)
         if size == 16:
-            return self.i2t(f"_mm256_blend_epi16({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:016b})")
+            if width == 16:
+
+
+                return self.i2t(f"_mm256_blend_epi32({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})")
+            else:
+                return self.i2t(f"_mm256_blend_epi16({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})")
         if size == 8:
             return self.i2t(f"_mm256_blend_epi32({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})")
         elif size == 4:
             return self.d2t(f"_mm256_blend_pd({self.t2d(v1)}, {self.t2d(v2)}, 0b{mask:08b})")
         raise Exception("WTF")
 
+
+    def generate_vec_blend(self, v1: str, v2: str, blend: str):
+        return
+
     def generate_reverse(self, v: str):
         size = self.vector_size()
+        if size == 16:
+            v = f"_mm256_shuffle_epi32({self.t2i(v)}, 0b00'01'10'11)"
+            return self.d2t(f"_mm256_permute4x64_pd(i2d({v}), 0b01'00'11'10)")
         if size == 8:
             v = f"_mm256_shuffle_epi32({self.t2i(v)}, 0b00'01'10'11)"
             return self.d2t(f"_mm256_permute4x64_pd(i2d({v}), 0b01'00'11'10)")
@@ -160,7 +212,7 @@ class AVX2BitonicISA(BitonicISA):
         elif t == "uint64_t":
             return f"cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, {v1}), _mm256_xor_si256(topBit, {v2}));"
 
-        return "<<<REMOVE_ME>>>"
+        return AVX2BitonicISA.REMOVE_ME
 
     def generate_min(self, v1: str, v2: str):
         t = self.type
@@ -265,9 +317,38 @@ class AVX2BitonicISA(BitonicISA):
             it = t[1:] if t[0] == 'u' else t;
         return f"_mm256_maskstore_{int_suffix}(({it} *) ((__m256i *) {ptr} + {offset}), {mask}, {value})"
 
-    def clean_print(self, s: str, file: IO):
-        clean_lines = str.join("\n", [l for l in s.splitlines() if not "<<<REMOVE_ME>>>" in l])
-        print(clean_lines, file=file)
+    def generate_cmp_var(self):
+        if self.type == "int64_t" or self.type == "uint64_t":
+            return "TV cmp"
+
+        return AVX2BitonicISA.REMOVE_ME
+
+
+    def generate_topbit_vec(self):
+        if self.type == "uint64_t":
+            return "const TV topBit = _mm256_set1_epi64x(1LLU << 63)"
+
+        return AVX2BitonicISA.REMOVE_ME
+
+    def generate_x1_epi16_shuffle_vec(self):
+        if self.type == "uint16_t" or self.type == "int16_t":
+            l1 = 0x0504070601000302
+            l2 = 0x0D0C0F0E09080B0A
+            return f"const TV x1 = _mm256_set_epi64x(0x{l2:08X}, 0x{l1:08X}, 0x{l2:08X}, 0x{l1:08X})"
+
+        return AVX2BitonicISA.REMOVE_ME
+
+
+    def generate_x1_epi16_blend_vec(self, asc: bool):
+        if self.type == "uint16_t" or self.type == "int16_t":
+            l1 = 0x8080000080800000
+            l2 = 0x0000808000008080
+            if asc:
+                return f"const TV x1_blend = _mm256_set_epi64x(0x{l2:08X}, 0x{l2:08X}, 0x{l1:08X}, 0x{l1:08X})"
+            else:
+                return f"const TV x1_blend = _mm256_set_epi64x(0x{l1:08X}, 0x{l1:08X}, 0x{l2:08X}, 0x{l2:08X})"
+
+        return AVX2BitonicISA.REMOVE_ME
 
     def autogenerated_blabber(self):
         return f"""/////////////////////////////////////////////////////////////////////////////
@@ -278,9 +359,9 @@ class AVX2BitonicISA(BitonicISA):
 // the code-generator that generated this source file instead.
 /////////////////////////////////////////////////////////////////////////////"""
 
-    def generate_prologue(self, f: IO):
+    def generate_prologue(self):
         t = self.type
-        s = f"""{self.autogenerated_blabber()}
+        self.clean_print(f"""{self.autogenerated_blabber()}
 
 #ifndef BITONIC_MACHINE_AVX2_{t.upper()}_H
 #define BITONIC_MACHINE_AVX2_{t.upper()}_H
@@ -316,11 +397,10 @@ public:
     typedef {self.vector_type()} TV;
     typedef {self.vector_type()} TMASK;
 
-"""
-        print(s, file=f)
+""")
 
-    def generate_epilogue(self, f: IO):
-        s = f"""
+    def generate_epilogue(self):
+        self.clean_print(f"""
 }};
 }}
 }}
@@ -339,101 +419,117 @@ public:
 #pragma GCC pop_options
 #endif
 #endif
-#endif
-    """
-        print(s, file=f)
+#endif""");
 
-    def generate_1v_basic_sorters(self, f: IO, asc: bool):
+    def generate_1v_basic_sorters(self, asc: bool):
         g = self
-        type = self.type
-        maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
-        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "uint64_t") else ""
-        maybe_x1_epi16 = lambda: f"\n        const TV x1 = _mm256_set1_epi64x(0xE'F'C'D'A'B'8'9'6'7'4'5'2'3'0'1);" if (
-                type == "uint16_t" or type == "int16_t") else ""
         sfx = "ascending" if asc else "descending"
 
-        s = f"""    static INLINE void sort_01v_{sfx}({g.generate_param_def_list(1)}) {{
-            TV min, max, s{maybe_cmp()};{maybe_topbit()}{maybe_x1_epi16()}
+        self.clean_print(f"""    static INLINE void sort_01v_{sfx}({g.generate_param_def_list(1)}) {{
+        TV min, max, s;
+        {g.generate_cmp_var()};
+        {g.generate_topbit_vec()};
+        {g.generate_x1_epi16_shuffle_vec()};
+        {g.generate_x1_epi16_blend_vec(asc)};
 
-            s = {g.generate_shuffle_X1("d01")};
-            {g.crappity_crap_crap("s", "d01")}
-            min = {g.generate_min("s", "d01")};
-            max = {g.generate_max("s", "d01")};
-            d01 = {g.generate_blend("min", "max", 0b0110, 4, asc)};
+        s = {g.generate_shuffle_X1("d01")};
+        {g.crappity_crap_crap("s", "d01")}
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b0110, 4, asc)};
 
-            s = {g.generate_shuffle_X2("d01")};
-            {g.crappity_crap_crap("s", "d01")}
-            min = {g.generate_min("s", "d01")};
-            max = {g.generate_max("s", "d01")};
-            d01 = {g.generate_blend("min", "max", 0b00111100, 8, asc)};
+        s = {g.generate_shuffle_X2("d01")};
+        {g.crappity_crap_crap("s", "d01")}
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b00111100, 8, asc)};
 
-            s = {g.generate_shuffle_X1("d01")};
-            {g.crappity_crap_crap("s", "d01")}
-            min = {g.generate_min("s", "d01")};
-            max = {g.generate_max("s", "d01")};
-            d01 = {g.generate_blend("min", "max", 0b01011010, 8, asc)};"""
+        s = {g.generate_shuffle_X1("d01")};
+        {g.crappity_crap_crap("s", "d01")}
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b01011010, 8, asc)};""")
 
-        self.clean_print(s, file=f)
+        if g.vector_size() >= 8:
+            self.clean_print(f"""
+        s = {g.generate_shuffle_X4("d01")};
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b0000111111110000, 16, asc)};
 
-        if g.vector_size() == 8:
-            s = f"""
-            s = {g.generate_shuffle_X4("d01")};
-            min = {g.generate_min("s", "d01")};
-            max = {g.generate_max("s", "d01")};
-            d01 = {g.generate_blend("min", "max", 0b11110000, 8, asc)};
+        s = {g.generate_shuffle_X2("d01")};
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b0011001111001100, 16, asc)};
 
-            s = {g.generate_shuffle_X2("d01")};
-            min = {g.generate_min("s", "d01")};
-            max = {g.generate_max("s", "d01")};
-            d01 = {g.generate_blend("min", "max", 0b11001100, 8, asc)};
+        s = {g.generate_shuffle_X1("d01")};
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b0101010110101010, 16, asc)};""")
 
-            s = {g.generate_shuffle_X1("d01")};
-            min = {g.generate_min("s", "d01")};
-            max = {g.generate_max("s", "d01")};
-            d01 = {g.generate_blend("min", "max", 0b10101010, 8, asc)};"""
-            self.clean_print(s, file=f)
-        print("    }\n", file=f)
+        if g.vector_size() >= 16:
+            g.clean_print(f"""
+        s = {g.generate_shuffle_X8("d01")};
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b1111111100000000, 16, asc)};
+        
+        s = {g.generate_shuffle_X4("d01")};
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b11110000, 8, asc)};
 
-    def generate_1v_merge_sorters(self, f: IO, asc: bool):
+        s = {g.generate_shuffle_X2("d01")};
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b1100, 4, asc)};
+
+        s = {g.generate_shuffle_X1("d01")};
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b10, 2, asc)};""")
+        g.clean_print("    }\n")
+
+    def generate_1v_merge_sorters(self, asc: bool):
         g = self
-        type = self.type
-        maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
-        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (
-                type == "uint64_t") else ""
-        maybe_x1_epi16 = lambda: f"\n        const TV x1 = _mm256_set1_epi64x(0xE'F'C'D'A'B'8'9'6'7'4'5'2'3'0'1);" if (
-                type == "uint16_t" or type == "int16_t") else ""
-
         sfx = "ascending" if asc else "descending"
 
-        s = f"""    static INLINE void merge_01v_{sfx}({g.generate_param_def_list(1)}) {{
-            TV min, max, s{maybe_cmp()};{maybe_topbit()}{maybe_x1_epi16()}"""
-        print(s, file=f)
+        g.clean_print(f"""    static INLINE void merge_01v_{sfx}({g.generate_param_def_list(1)}) {{
+        TV min, max, s;
+        {g.generate_cmp_var()};
+        {g.generate_topbit_vec()};
+        {g.generate_x1_epi16_shuffle_vec()};""");
 
-        if g.vector_size() == 8:
-            s = f"""
-            s = {g.generate_shuffle_X4("d01")};
-            min = {g.generate_min("s", "d01")};
-            max = {g.generate_max("s", "d01")};
-            d01 = {g.generate_blend("min", "max", 0b11110000, 8, asc)};"""
-            self.clean_print(s, file=f)
+        if g.vector_size() >= 16:
+            g.clean_print(f"""
+        s = {g.generate_shuffle_X8("d01")};
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b1111111100000000, 16, asc)};""")
 
-        s = f"""
-            s = {g.generate_shuffle_X2("d01")};
-            {g.crappity_crap_crap("s", "d01")}
-            min = {g.generate_min("s", "d01")};
-            max = {g.generate_max("s", "d01")};
-            d01 = {g.generate_blend("min", "max", 0b1100, 4, asc)};
+        if g.vector_size() >= 8:
+            g.clean_print(f"""
+        s = {g.generate_shuffle_X4("d01")};
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b11110000, 8, asc)};""")
 
-            s = {g.generate_shuffle_X1("d01")};
-            {g.crappity_crap_crap("s", "d01")}
-            min = {g.generate_min("s", "d01")};
-            max = {g.generate_max("s", "d01")};
-            d01 = {g.generate_blend("min", "max", 0b10, 2, asc)};"""
+        g.clean_print(f"""
+        s = {g.generate_shuffle_X2("d01")};
+        {g.crappity_crap_crap("s", "d01")}
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b1100, 4, asc)};
 
-        self.clean_print(s, file=f)
-        self.clean_print("    }\n", file=f)
+        s = {g.generate_shuffle_X1("d01")};
+        {g.crappity_crap_crap("s", "d01")}
+        min = {g.generate_min("s", "d01")};
+        max = {g.generate_max("s", "d01")};
+        d01 = {g.generate_blend("min", "max", 0b10, 2, asc)};""")
 
-    def generate_compounded_sorter(self, f: IO, width: int, asc: bool, inline: int):
+        g.clean_print("    }\n")
+
+    def generate_compounded_sorter(self, width: int, asc: bool, inline: int):
         type = self.type
         g = self
         maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
@@ -448,13 +544,11 @@ public:
 
         inl = "INLINE" if inline else "NOINLINE"
 
-        s = f"""    static {inl} void sort_{width:02d}v_{sfx}({g.generate_param_def_list(width)}) {{
+        g.clean_print(f"""    static {inl} void sort_{width:02d}v_{sfx}({g.generate_param_def_list(width)}) {{
         TV tmp{maybe_cmp()};{maybe_topbit()}
 
         sort_{w1:02d}v_{sfx}({g.generate_param_list(1, w1)});
-        sort_{w2:02d}v_{rev_sfx}({g.generate_param_list(w1 + 1, w2)});"""
-
-        print(s, file=f)
+        sort_{w2:02d}v_{rev_sfx}({g.generate_param_list(w1 + 1, w2)});""")
 
         for r_n in range(w1 + 1, width + 1):
             l_n = w1 + 1 - (r_n - w1)
@@ -469,21 +563,19 @@ public:
             ##    r_var = f"d{l_n:02d}" # This is swapped on purpose!
             ##    l_var = f"d{r_n:02d}" # This is swapped on purpose!
 
-            s = f"""
+            g.clean_print(f"""
         tmp = {r_var};
         {g.crappity_crap_crap(f"{l_var}", f"{r_var}")}
         {r_var} = {g.generate_max(f"{l_var}", f"{r_var}")};
-        {l_var} = {g.generate_min(f"{l_var}", "tmp")};"""
+        {l_var} = {g.generate_min(f"{l_var}", "tmp")};""")
 
-            self.clean_print(s, file=f)
 
-        s = f"""
+        g.clean_print(f"""
         merge_{w1:02d}v_{sfx}({g.generate_param_list(1, w1)});
-        merge_{w2:02d}v_{sfx}({g.generate_param_list(w1 + 1, w2)});"""
-        self.clean_print(s, file=f)
-        self.clean_print("    }\n", file=f)
+        merge_{w2:02d}v_{sfx}({g.generate_param_list(w1 + 1, w2)});""")
+        g.clean_print("    }\n")
 
-    def generate_compounded_merger(self, f: IO, width: int, asc: bool, inline: int):
+    def generate_compounded_merger(self, width: int, asc: bool, inline: int):
         type = self.type
         g = self
         maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
@@ -497,49 +589,45 @@ public:
 
         inl = "INLINE" if inline else "NOINLINE"
 
-        s = f"""    static {inl} void merge_{width:02d}v_{sfx}({g.generate_param_def_list(width)}) {{
-        TV tmp{maybe_cmp()};{maybe_topbit()}"""
-        print(s, file=f)
+        g.clean_print(f"""    static {inl} void merge_{width:02d}v_{sfx}({g.generate_param_def_list(width)}) {{
+        TV tmp{maybe_cmp()};{maybe_topbit()}""")
 
         for r in range(w1 + 1, width + 1):
             x = r - w1
-            s = f"""
+            g.clean_print(f"""
         tmp = d{x:02d};
         {g.crappity_crap_crap(f"d{r:02d}", f"d{x:02d}")}
         d{x:02d} = {g.generate_min(f"d{r:02d}", f"d{x:02d}")};
         {g.crappity_crap_crap(f"d{r:02d}", "tmp")}
-        d{r:02d} = {g.generate_max(f"d{r:02d}", "tmp")};"""
-            self.clean_print(s, file=f)
+        d{r:02d} = {g.generate_max(f"d{r:02d}", "tmp")};""")
 
-        s = f"""
+        g.clean_print(f"""
         merge_{w1:02d}v_{sfx}({g.generate_param_list(1, w1)});
-        merge_{w2:02d}v_{sfx}({g.generate_param_list(w1 + 1, w2)});"""
-        self.clean_print(s, file=f)
-        self.clean_print("    }\n", file=f)
+        merge_{w2:02d}v_{sfx}({g.generate_param_list(w1 + 1, w2)});""")
+        g.clean_print("    }\n")
 
-    def generate_cross_min_max(self, f: IO):
+    def generate_cross_min_max(self):
         g = self
         type = self.type
         maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
         maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "uint64_t") else ""
 
-        s = f"""    static INLINE void cross_min_max(TV& d01, TV& d02) {{
+        g.clean_print(f"""    static INLINE void cross_min_max(TV& d01, TV& d02) {{
         TV tmp{maybe_cmp()};{maybe_topbit()}
 
         tmp = {g.generate_reverse("d02")};
         {g.crappity_crap_crap("d01", "tmp")}
         d02 = {g.generate_max("d01", "tmp")};        
         d01 = {g.generate_min("d01", "tmp")};    
-    }}\n"""
-        self.clean_print(s, file=f)
+    }}\n""")
 
-    def generate_strided_min_max(self, f: IO):
+    def generate_strided_min_max(self):
         g = self
         type = self.type
         maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
         maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "uint64_t") else ""
 
-        s = f"""    static INLINE void strided_min_max(TV& dl, TV& dr) {{
+        g.clean_print(f"""    static INLINE void strided_min_max(TV& dl, TV& dr) {{
         TV tmp{maybe_cmp()};{maybe_topbit()}
         
         tmp = dl;
@@ -547,78 +635,66 @@ public:
         dl = {g.generate_min("dr", "dl")};
         {g.crappity_crap_crap("dr", "tmp")}
         dr = {g.generate_max("dr", "tmp")};
-    }}\n"""
-        self.clean_print(s, file=f)
+    }}\n""")
 
-    def generate_entry_points_full_vectors(self, f : IO, asc: bool):
+    def generate_entry_points_full_vectors(self, asc: bool):
         type = self.type
         g = self
         sfx = "ascending" if asc else "descending"
         for m in range(1, g.max_bitonic_sort_vectors() + 1):
-            s = f"""
+            g.clean_print(f"""
     // This is generated for testing purposes only
-    static NOINLINE void sort_{m:02d}v_full_{sfx}({type} *ptr) {{"""
-            self.clean_print(s, file=f)
+    static NOINLINE void sort_{m:02d}v_full_{sfx}({type} *ptr) {{""")
 
             for l in range(0, m):
-                s = f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};"
-                print(s, file=f)
+                g.clean_print(f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};")
 
-            s = f"        sort_{m:02d}v_{sfx}({g.generate_param_list(1, m)});"
-            self.clean_print(s, file=f)
+            g.clean_print(f"        sort_{m:02d}v_{sfx}({g.generate_param_list(1, m)});")
 
             for l in range(0, m):
-                s = f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};"
-                self.clean_print(s, file=f)
+                g.clean_print(f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};")
 
-            self.clean_print("    }\n", file=f)
+            g.clean_print("    }\n")
 
     def generate_entry_points_partial(self, f: IO):
         type = self.type
         g = self
         for m in range(1, g.max_bitonic_sort_vectors() + 1):
-            s = f"""
+            g.clean_print(f"""
     static NOINLINE void sort_{m:02d}v_partial({type} *ptr, int remainder) {{
         assert(remainder * N < sizeof(mask_table_{self.vector_size()}));
         const auto mask = _mm256_cvtepi8_epi{int(256 / self.vector_size())}(_mm_loadu_si128((__m128i*)(mask_table_{self.vector_size()} + remainder * N)));
-"""
-            self.clean_print(s, file=f)
+""")
 
             for l in range(0, m-1):
-                s = f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};"
-                print(s, file=f)
-            s = f"        TV d{m:02d} = {g.get_mask_load_intrinsic('ptr', m - 1, 'mask')};"
-            self.clean_print(s, file=f)
+                g.clean_print(f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};")
 
-            s = f"        sort_{m:02d}v_ascending({g.generate_param_list(1, m)});"
-            self.clean_print(s, file=f)
+            g.clean_print(f"        TV d{m:02d} = {g.get_mask_load_intrinsic('ptr', m - 1, 'mask')};")
+
+            g.clean_print(f"        sort_{m:02d}v_ascending({g.generate_param_list(1, m)});")
 
             for l in range(0, m-1):
-                s = f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};"
-                print(s, file=f)
-            s = f"        {g.get_mask_store_intrinsic('ptr', m - 1, f'd{m:02d}', 'mask')};"
-            self.clean_print(s, file=f)
+                g.clean_print(f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};")
+            g.clean_print(f"        {g.get_mask_store_intrinsic('ptr', m - 1, f'd{m:02d}', 'mask')};")
 
-            self.clean_print("    }", file=f)
+            g.clean_print("    }")
 
-    def generate_master_entry_point_full(self, f: IO, asc: bool):
-        basename = os.path.basename(f.name)
+    def generate_master_entry_point_full(self, asc: bool):
         t = self.type
+        g = self
 
         sfx = "ascending" if asc else "descending"
 
-        s = f"""
+        g.clean_print(f"""
     // This is generated for testing purposes only
     static void sort_full_vectors_{sfx}({t} *ptr, size_t length) {{
         assert(length % N == 0);
-        switch(length / N) {{"""
-        self.clean_print(s, file=f)
+        switch(length / N) {{""")
 
         for m in range(1, self.max_bitonic_sort_vectors() + 1):
-            s = f"            case {m}: sort_{m:02d}v_full_{sfx}(ptr); break;"
-            print(s, file=f)
-        self.clean_print("        }", file=f)
-        self.clean_print("    }\n", file=f)
+            g.clean_print(f"            case {m}: sort_{m:02d}v_full_{sfx}(ptr); break;")
+        g.clean_print("        }")
+        g.clean_print("    }\n")
 
     #     s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX2 >::sort({t} *ptr, size_t length) {{
     # const auto fullvlength = length / N;

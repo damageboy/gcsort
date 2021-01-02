@@ -3,6 +3,8 @@ import argparse
 import os
 from enum import Enum
 
+from typing.io import IO
+
 from avx2 import AVX2BitonicISA
 from avx512 import AVX512BitonicISA
 from bitonic_isa import BitonicISA
@@ -22,46 +24,45 @@ def get_generator_supported_types(vector_isa):
         raise Exception(f"Non-supported vector machine-type: {vector_isa}")
 
 
-def get_generator(vector_isa, type):
+def get_generator(vector_isa, type, f_header: IO):
     if isinstance(vector_isa, str):
         vector_isa = VectorISA[vector_isa]
     if vector_isa == VectorISA.AVX2:
-        return AVX2BitonicISA(type)
+        return AVX2BitonicISA(type, f_header)
     elif vector_isa == VectorISA.AVX512:
-        return AVX512BitonicISA(type)
+        return AVX512BitonicISA(type, f_header)
     else:
         raise Exception(f"Non-supported vector machine-type: {vector_isa}")
 
 
-def generate_per_type(f_header, type, vector_isa, break_inline):
-    g = get_generator(vector_isa, type)
-    g.generate_prologue(f_header)
-    g.generate_1v_sorters(f_header, ascending=True)
-    g.generate_1v_sorters(f_header, ascending=False)
+def generate_per_type(f_header: IO, type, vector_isa, break_inline):
+    g = get_generator(vector_isa, type, f_header)
+    g.generate_prologue()
+    g.generate_1v_sorters(ascending=True)
+    g.generate_1v_sorters(ascending=False)
     for width in range(2, g.max_bitonic_sort_vectors() + 1):
-
         # Allow breaking the inline chain once in a while (configurable)
         if break_inline == 0 or width % break_inline != 0:
             inline = True
         else:
             inline = False
-        g.generate_compounded_sorter(f_header, width, asc=True, inline=inline)
-        g.generate_compounded_sorter(f_header, width, asc=False, inline=inline)
+        g.generate_compounded_sorter(width, asc=True, inline=inline)
+        g.generate_compounded_sorter(width, asc=False, inline=inline)
         if width <= g.largest_merge_variant_needed():
-            g.generate_compounded_merger(f_header, width, asc=True, inline=inline)
-            g.generate_compounded_merger(f_header, width, asc=False, inline=inline)
+            g.generate_compounded_merger(width, asc=True, inline=inline)
+            g.generate_compounded_merger(width, asc=False, inline=inline)
 
 
-    g.generate_cross_min_max(f_header)
-    g.generate_strided_min_max(f_header)
+    g.generate_cross_min_max()
+    g.generate_strided_min_max()
 
     print("\n#ifdef BITONIC_TESTS", file=f_header)
-    g.generate_entry_points_full_vectors(f_header, asc=True)
-    g.generate_entry_points_full_vectors(f_header, asc=False)
-    g.generate_master_entry_point_full(f_header, asc=True)
-    g.generate_master_entry_point_full(f_header, asc=False)
+    g.generate_entry_points_full_vectors(asc=True)
+    g.generate_entry_points_full_vectors(asc=False)
+    g.generate_master_entry_point_full(asc=True)
+    g.generate_master_entry_point_full(asc=False)
     print("\n#endif", file=f_header)
-    g.generate_epilogue(f_header)
+    g.generate_epilogue()
 
 
 class Language(Enum):
@@ -105,7 +106,6 @@ def generate_all_types():
             filename = f"bitonic_machine.{isa}.{t}.generated"
             print(f"Generating {filename}.{{h,.cpp}}")
             h_filename = os.path.join(opts.output_dir, filename + ".h")
-            #h_src = os.path.join(opts.output_dir, filename + ".cpp")
             with open(h_filename, "w") as f_header:
                 generate_per_type(f_header, t, isa, opts.break_inline)
 
