@@ -29,15 +29,22 @@ void perform_bitonic_machine_sort_test(std::vector<T> V) {
     }
     auto begin = V.data();
     auto size = V.size();
+    auto v_copy = V;
+
     if (ascending)
         vxsort::smallsort::bitonic_machine<T, M>::sort_full_vectors_ascending(begin, size);
     else
         vxsort::smallsort::bitonic_machine<T, M>::sort_full_vectors_descending(begin, size);
 
-    if (ascending)
-        EXPECT_THAT(V, WhenSortedBy(std::less<T>(), ElementsAreArray(V)));
-    else
-        EXPECT_THAT(V, WhenSortedBy(std::greater<T>(), ElementsAreArray(V)));
+    std::sort(v_copy.begin(), v_copy.end());
+
+    EXPECT_THAT(V, ElementsAreArray(v_copy));
+//
+
+//    if (ascending)
+//        EXPECT_THAT(V, WhenSortedBy(std::less<T>(), ElementsAreArray(V)));
+//    else
+//        EXPECT_THAT(V, WhenSortedBy(std::greater<T>(), ElementsAreArray(V)));
 }
 
 template <class T, vector_machine M>

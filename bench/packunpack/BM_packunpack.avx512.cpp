@@ -2,8 +2,8 @@
 
 #include "BM_packunpack.h"
 
-#include <machine_traits.avx512.h>
 #include <packer.h>
+#include <vector_machine/machine_traits.avx512.h>
 
 using vxsort::vector_machine;
 

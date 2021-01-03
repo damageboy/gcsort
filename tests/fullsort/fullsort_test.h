@@ -17,7 +17,6 @@ using testing::Types;
 
 using vxsort::vector_machine;
 
-
 template <class T, int Unroll, vector_machine M>
 void perform_vxsort_test(std::vector<T> V) {
   if (!vxsort::supports_vector_machine(M)) {

@@ -3,7 +3,7 @@
 #include "gtest/gtest.h"
 #include "../fixtures.h"
 
-#include <machine_traits.avx512.h>
+#include <vector_machine/machine_traits.avx512.h>
 
 #include "packunpack_test.h"
 
